@@ -465,6 +465,9 @@ body{font-feature-settings:"ss01","cv11";text-rendering:optimizeLegibility}
 .mainnav{display:inline-flex;background:var(--seg-bg);border-radius:12px;padding:3px;gap:2px}
 .mainnav button{border:0;background:transparent;display:inline-flex;align-items:center;gap:7px;padding:7px 14px;border-radius:9px;font-size:13.5px;font-weight:500;color:var(--fg-2);white-space:nowrap;transition:background .25s var(--ease),color .25s var(--ease)}
 .mainnav button svg{width:17px;height:17px;flex:none}
+.mainnav button{position:relative}
+.nbadge{font-style:normal;min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:var(--bad);color:#fff;font-size:11px;font-weight:700;display:inline-grid;place-items:center;line-height:1}
+@media (max-width:760px){.nbadge{position:absolute;top:0;right:6px}}
 .mainnav button:hover{color:var(--fg)}
 .mainnav button[aria-current="page"]{background:var(--seg-on);color:var(--fg);font-weight:600;box-shadow:0 1px 3px rgba(0,0,0,.12),0 0 0 .5px rgba(0,0,0,.04)}
 @media (max-width:760px){
@@ -600,6 +603,13 @@ button.kpi{text-align:left;font:inherit;color:inherit;width:100%}
 .chap .cn{width:40px;height:40px;border-radius:12px;display:grid;place-items:center;font-weight:700;color:#fff}
 .chap b{display:block;font-size:14px}.chap small{color:var(--fg-2);font-size:12px}
 .chap .seen{font-size:11px;color:var(--ok);font-weight:700}
+.dls{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,230px),1fr));gap:8px}
+.dl{display:grid;grid-template-columns:30px minmax(0,1fr) 18px;gap:10px;align-items:center;padding:9px 12px;border-radius:12px;background:var(--surface-2);color:var(--fg);text-decoration:none;font-size:13.5px;font-weight:500}
+.dl:hover{background:var(--surface-3)}
+.dl .cn{width:30px;height:30px;border-radius:9px;display:grid;place-items:center;color:#fff;font-weight:700;font-size:13px}
+.dl .dt2{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dl svg,a.btn svg{width:16px;height:16px}
+a.btn{text-decoration:none}
 /* agente */
 .acts{display:flex;flex-direction:column;gap:4px;width:100%;font-size:12.5px;padding:8px 10px;border-radius:12px;background:var(--surface);border:1px solid var(--line)}
 .acts div{display:flex;gap:6px;align-items:flex-start}
@@ -683,7 +693,9 @@ const nuvem=()=>S.mode==="nuvem";
 const isSuper=()=>nuvem()&&!!S.user&&S.user.verified&&!!CFG.adminEmail&&S.user.email.toLowerCase()===String(CFG.adminEmail).toLowerCase();
 const isAdmin=()=>nuvem()&&(isSuper()||(!!S.perfil&&S.perfil.papel==="admin"));
 const can=k=>!nuvem()||isAdmin()||!!(S.perfil&&S.perfil.priv&&S.perfil.priv[k]);
-const seeTeam=()=>nuvem()&&(can("verEquipe")||can("editarEquipe"));
+const aprovadoC=()=>!nuvem()||isAdmin()||(!!S.perfil&&(S.perfil.status||"aprovado")==="aprovado");
+const seeTeam=()=>nuvem()&&aprovadoC()&&(can("verEquipe")||can("editarEquipe"));
+const pedidos=()=>S.perfis.filter(u=>u.status==="pendente");
 const canEdit=p=>!S.roAll&&(!nuvem()||!p||p.owner===(S.user&&S.user.id)||can("editarEquipe"));
 const canDel=p=>!S.roAll&&(!nuvem()||(can("excluir")&&(isAdmin()||p.owner===(S.user&&S.user.id)||can("editarEquipe"))));
 const cfgLocked=()=>nuvem()&&!can("editarPrograma");
@@ -840,6 +852,7 @@ function render(){
   if(S.view!=="aulas"&&AU.playing)aulaStop();
   let html,key;
   if(S.mode==="nuvem"&&S.loaded&&!S.user){m.classList.remove("ro");html=authView();key="auth"}
+  else if(S.mode==="nuvem"&&S.loaded&&S.user&&S.perfil&&!aprovadoC()){m.classList.remove("ro");html=pedidoView();key="pedido"}
   else if(!S.loaded){html=splashHTML();key="splash"}
   else{
     if(S.view==="gestao"&&!seeTeam())S.view="painel";
@@ -1264,6 +1277,8 @@ function act(a,b){
     case"drill-back":S.drill=S.drillStack.pop()||null;if(S.drill)renderDrill();else closeDrill();break;
     case"open-prof":{closeDrill();const p=S.profs.find(x=>x.id===b.dataset.id);if(!p)break;S.view="painel";S.tab=p.id;S.method[p.id]=b.dataset.m||nextStep(p).m||"fca";savePrefs();S.scrollSel=".mseg";render();break}
     case"g-serie":S.gShow[b.dataset.u]=!S.gShow[b.dataset.u];render();break;
+    case"aprovar":decidirPedido(b.dataset.u,"aprovado");break;
+    case"recusar":decidirPedido(b.dataset.u,"recusado");break;
     case"edit-prof":{const p=b.dataset.id?S.profs.find(x=>x.id===b.dataset.id):cur();openSheetEdit(p);break}
     case"guide":{const p=cur();if(p&&b.dataset.m)S.method[p.id]=b.dataset.m;savePrefs();
       if(b.dataset.run){act(b.dataset.run,b);break}
@@ -1866,9 +1881,9 @@ async function ensurePerfil(fu){
   const ref=FS().collection("perfis").doc(fu.uid),snap=await ref.get();
   // Só o e-mail do administrador principal, verificado, nasce como admin (o firestore.rules confere o mesmo).
   if(snap.exists){const d=Object.assign({id:fu.uid},snap.data());
-    if(isSuper()&&d.papel!=="admin"){try{await ref.update({papel:"admin"});d.papel="admin"}catch(e){}}
+    if(isSuper()&&(d.papel!=="admin"||(d.status||"aprovado")!=="aprovado")){try{await ref.update({papel:"admin",status:"aprovado"});d.papel="admin";d.status="aprovado"}catch(e){}}
     return d}
-  const d={nome:S.pendingNome||fu.displayName||"",email:fu.email||"",papel:isSuper()?"admin":"usuario",criado_em:new Date().toISOString(),priv:Object.assign({},PRIV0)};
+  const d={nome:S.pendingNome||fu.displayName||"",email:fu.email||"",papel:isSuper()?"admin":"usuario",criado_em:new Date().toISOString(),priv:Object.assign({},PRIV0),status:isSuper()?"aprovado":"pendente",pedido:""};
   await ref.set(d);return Object.assign({id:fu.uid},d);
 }
 // Quando o administrador muda os acessos de alguém, a sessão dessa pessoa recarrega com os novos acessos.
@@ -1905,15 +1920,27 @@ async function onUser(fu,manterAba){
   S.user=fu?{id:fu.uid,email:fu.email||"",verified:!!fu.emailVerified}:null;S.profs=[];S.perfil=null;S.perfis=[];S.hist=[];S.upd={};S.fUser="";dirty.clear();S.cfg=defCfg();
   if(!fu){S.loaded=true;savedLabel();render();return}
   S.loaded=false;S.ready={p:false,c:false};setSave("busy","Carregando…");render();
-  try{S.perfil=await ensurePerfil(fu);S.pendingNome="";await nuvemLoad()}
+  const chave=x=>JSON.stringify([x&&x.papel,x&&x.priv,x&&(x.status||"aprovado")]);
+  const ouvirPerfil=()=>nuvemUnsub.push(FS().collection("perfis").doc(fu.uid).onSnapshot(d=>{
+    if(!d.exists||!S.perfil||!S.user||S.user.id!==fu.uid)return;const n=Object.assign({id:fu.uid},d.data());
+    if(chave(n)!==chave(S.perfil)){const liberou=!aprovadoC()&&(n.status||"aprovado")==="aprovado";S.perfil=n;toast(liberou?"Seu acesso foi aprovado. Bem-vindo!":"Os seus acessos foram atualizados pelo administrador.",{tone:liberou?"ok":""});recarregarAcessos(fu)}else S.perfil=n},()=>{}));
+  try{S.perfil=await ensurePerfil(fu);S.pendingNome="";if(aprovadoC())await nuvemLoad()}
   catch(e){console.error(e);S.perfil=S.perfil||{id:fu.uid,nome:"",email:fu.email||"",papel:"usuario"};toast("Não foi possível carregar o seu perfil: "+authMsg(e))}
+  // Conta ainda não aprovada: mostra só a tela do pedido e espera a decisão do administrador.
+  if(!aprovadoC()){ouvirPerfil();S.loaded=true;savedLabel();render();return}
   const col=FS().collection("profissionais");
   nuvemUnsub.push((seeTeam()?col:col.where("owner","==",fu.uid)).onSnapshot(onNuvemProfs,e=>{nuvemErr(e);S.ready.p=true;nuvemPronto()}));
   nuvemUnsub.push(FS().collection("config").doc("geral").onSnapshot(onNuvemCfg,()=>{S.ready.c=true;nuvemPronto()}));
-  const chave=x=>JSON.stringify([x&&x.papel,x&&x.priv]);
-  nuvemUnsub.push(FS().collection("perfis").doc(fu.uid).onSnapshot(d=>{
-    if(!d.exists||!S.perfil||!S.user||S.user.id!==fu.uid)return;const n=Object.assign({id:fu.uid},d.data());
-    if(chave(n)!==chave(S.perfil)){S.perfil=n;toast("Os seus acessos foram atualizados pelo administrador.");recarregarAcessos(fu)}else S.perfil=n},()=>{}));
+  ouvirPerfil();
+  // Administrador acompanha os pedidos de acesso em tempo real.
+  if(isAdmin()){let primeira=true;nuvemUnsub.push(FS().collection("perfis").onSnapshot(s=>{
+    const lista=s.docs.map(x=>Object.assign({id:x.id},x.data())),antes=new Set(S.perfis.filter(u=>u.status==="pendente").map(u=>u.id));
+    const novos=lista.filter(u=>u.status==="pendente"&&!antes.has(u.id));
+    if(JSON.stringify(lista)!==JSON.stringify(S.perfis)){S.perfis=lista;const meu=lista.find(x=>x.id===S.user.id);if(meu)S.perfil=meu;if(S.loaded)remoteRender()}
+    const pend=lista.filter(u=>u.status==="pendente");
+    if(primeira&&pend.length)toast(plural(pend.length,"pedido de acesso aguardando","pedidos de acesso aguardando")+" a sua aprovação.",{btn:"Ver pedidos",fn:()=>{S.view="gestao";savePrefs();render();window.scrollTo({top:0})}});
+    else if(!primeira&&novos.length)toast("Novo pedido de acesso: "+(novos[0].nome||novos[0].email),{btn:"Ver pedidos",fn:()=>{S.view="gestao";savePrefs();render();window.scrollTo({top:0})}});
+    primeira=false},()=>{}))}
 }
 async function bootNuvem(){
   S.mode="nuvem";setSave("busy","Conectando…");
@@ -1975,8 +2002,9 @@ const NAVI={
 function navRender(){
   const el=$("#mainnav");if(!el)return;
   const show=S.loaded&&!(S.mode==="nuvem"&&!S.user);
+  const np=isAdmin()?pedidos().length:0;
   const items=[["painel","Início"]].concat(seeTeam()?[["gestao","Gestão"]]:[],[["relatorio","Relatório"],["aulas","Aulas"]]);
-  const h=show?items.map(([v,l])=>`<button type="button" data-act="view" data-v="${v}"${S.view===v?' aria-current="page"':""}>${NAVI[v]}<span>${l}</span></button>`).join(""):"";
+  const h=show&&aprovadoC()?items.map(([v,l])=>`<button type="button" data-act="view" data-v="${v}"${S.view===v?' aria-current="page"':""}>${NAVI[v]}<span>${l}</span>${v==="gestao"&&np?`<em class="nbadge" aria-label="${plural(np,"pedido","pedidos")} de acesso">${np}</em>`:""}</button>`).join(""):"";
   if(el.innerHTML!==h)el.innerHTML=h;el.hidden=!show;
 }
 
@@ -2044,7 +2072,7 @@ function teamCard(){
   return`<button type="button" class="card click" data-act="view" data-v="gestao" style="text-align:left;width:100%;font:inherit;color:inherit;display:flex;gap:16px;align-items:center"><span class="aiav" style="width:44px;height:44px;border-radius:13px">${NAVI.gestao}</span><span style="flex:1;min-width:0"><b style="font-size:17px">Gestão da equipe</b><br><span class="muted small">Painéis, alertas e a evolução de cada usuário e dos seus profissionais.</span></span>${ICON.arrow}</button>`;
 }
 function equipe(){
-  return S.perfis.slice().sort((a,b)=>String(a.nome||a.email).localeCompare(String(b.nome||b.email))).map(u=>{
+  return S.perfis.filter(u=>u.papel==="admin"||(u.status||"aprovado")==="aprovado").sort((a,b)=>String(a.nome||a.email).localeCompare(String(b.nome||b.email))).map(u=>{
     const ps=S.profs.filter(p=>p.owner===u.id),ms=ps.map(metrics),sum=k=>ms.reduce((a,m)=>a+m[k],0);
     const last=ps.map(p=>S.upd[p.id]||"").sort().pop()||"";
     return{u,ps,ms,prog:ms.length?Math.round(sum("prog")/ms.length):0,acoes:sum("acoes"),conc:sum("conc"),late:sum("late"),custo:sum("custo"),last,nome:u.nome||u.email||"Usuário"};
@@ -2053,6 +2081,7 @@ function equipe(){
 const diasDesde=iso=>iso?Math.floor((Date.now()-new Date(iso))/864e5):null;
 function alertas(uidF){
   const out=[];const ps=S.profs.filter(p=>!uidF||p.owner===uidF);
+  if(!uidF&&isAdmin()&&pedidos().length)out.push({tone:"bad",ic:"?",t:plural(pedidos().length,"pedido de acesso aguardando aprovação","pedidos de acesso aguardando aprovação"),d:pedidos().map(u=>u.nome||u.email).join(", "),k:"pedidos",a:""});
   ps.forEach(p=>p.w5h2.forEach((a,i)=>{if(isLate(a))out.push({tone:"bad",ic:"!",t:"Ação atrasada: "+(a.oque||"sem título"),d:`${ownerName(p.owner)} · ${firstName(p.nome)} · venceu em ${fmtDate(a.quando)}`,k:"prof",a:p.id})}));
   ps.forEach(p=>{const n=diasDesde(S.upd[p.id]),ns=nextStep(p);if(n!=null&&n>=7&&!ns.done)out.push({tone:"warn",ic:"⏱",t:`${p.nome||"Profissional"} sem atualização há ${n} dias`,d:`${ownerName(p.owner)} · parado em: ${ns.title}`,k:"prof",a:p.id})});
   equipe().filter(e=>!uidF||e.u.id===uidF).forEach(e=>{
@@ -2080,7 +2109,7 @@ function gestaoView(){
   const kpi=(k,l,v,s,cls)=>`<button type="button" class="kpi click ${cls||""}" data-act="drill" data-k="${k}"><span class="lbl">${l}</span><div class="v">${v}</div><div class="s">${s}</div></button>`;
   const series=[{name:"Média da equipe",cor:"#0A84FF",points:mediaSerie(S.profs).map(([d,v])=>[d,v])}].concat(eq.filter(e=>e.ps.length).map((e,i)=>({name:e.nome,cor:CORES[(i+1)%CORES.length],points:mediaSerie(e.ps),drill:["user",e.u.id],hidden:!S.gShow[e.u.id]})));
   const d=new Date().toLocaleDateString("pt-BR",{weekday:"long",day:"numeric",month:"long"});
-  let h=`<div class="hero"><div><div class="eyebrow">${esc(d)}</div><h1>Gestão</h1></div><div class="row"><button type="button" class="btn quiet" data-act="equipe-refresh">Atualizar</button></div></div><div class="stack">
+  let h=`<div class="hero"><div><div class="eyebrow">${esc(d)}</div><h1>Gestão</h1></div><div class="row"><button type="button" class="btn quiet" data-act="equipe-refresh">Atualizar</button></div></div><div class="stack">${pedidosCard()}
   <div class="kpis">${kpi("usuarios","Usuários",eq.length,`${ativos} ativos nos últimos 7 dias`)}${kpi("profs","Profissionais",S.profs.length,`${ciclos} com ciclo completo`)}${kpi("maturidade","Maturidade média",t.prog+"%","toque para ver o ranking")}${kpi("atrasos","Ações em atraso",t.late,t.late?"precisam de novo prazo":"nenhuma em atraso",t.late?"bad":"ok")}${kpi("acoes","Ações concluídas",`${t.conc}<span class="muted" style="font-size:18px">/${t.acoes}</span>`,`${t.and} em andamento`)}${kpi("custos","Investimento",`<span style="font-size:22px">${BRL.format(t.custo)}</span>`,"por usuário e profissional")}</div>
   <div class="grid2"><div class="card"><div class="card-h"><h2>Alertas</h2><span class="muted small">${plural(al.length,"alerta","alertas")}</span></div>${al.length?`<div class="alerts">${al.slice(0,7).map(alertHTML).join("")}</div>${al.length>7?`<button type="button" class="linkbtn" data-act="drill" data-k="alertas">Ver todos os ${al.length} alertas ${ICON.arrow}</button>`:""}`:`<p class="tip">Nenhum alerta. A equipe está em dia.</p>`}</div>
   <div class="card"><div class="card-h"><h2>Evolução</h2><span class="muted small">maturidade média · 90 dias</span></div>${lineChart(series,{area:true,label:"Evolução da maturidade da equipe"})}
@@ -2103,6 +2132,40 @@ function ugroupHTML(e,adm){
     <div class="ubody"><div class="uprivs"><b style="font-size:12px;letter-spacing:.04em;text-transform:uppercase;color:var(--fg-2);margin-right:4px">Privilégios</b>${privs}${adm&&!principal&&u.id!==S.user.id?`<span style="margin-left:auto"><select class="field fsel" data-papel="${u.id}" aria-label="Papel de ${esc(e.nome)}"><option value="usuario"${u.papel!=="admin"?" selected":""}>Usuário</option><option value="admin"${u.papel==="admin"?" selected":""}>Admin</option></select></span>`:""}</div>
       ${e.ps.length?e.ps.map(pcardHTML).join(""):`<p class="tip">Este usuário ainda não cadastrou profissionais.</p>`}
       <div class="row"><button type="button" class="btn quiet sm" data-act="drill" data-k="user" data-a="${u.id}">Analisar ${esc(firstName(e.nome))} em detalhe ${ICON.arrow}</button></div></div></details>`;
+}
+
+/* ---------- Pedidos de acesso ---------- */
+function pedidoView(){
+  const P=S.perfil||{},rec=P.status==="recusado";
+  return`<div class="auth"><div class="card"><span class="logo-lg">${logoSVG("pd")}</span><div class="eyebrow">Rotinas de Trabalho</div>
+    <h2 style="margin:4px 0 6px">${rec?"Pedido de acesso recusado":"Pedido de acesso enviado"}</h2>
+    <p class="muted small" style="margin:0 0 16px">${rec?"O administrador não liberou o seu acesso. Se achar que foi engano, escreva uma mensagem e envie o pedido de novo.":"Olá, "+esc(firstName(P.nome||S.user.email))+". O administrador precisa aprovar a sua conta antes de você usar o portal. Esta tela abre sozinha assim que o pedido for aprovado."}</p>
+    <div class="mstate ${rec?"warn":"ok"}" role="status" style="margin-bottom:16px"><span class="ic"><svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="3" fill="#fff"/></svg></span><span><b>${rec?"Recusado":"Aguardando aprovação"}</b> · ${esc(S.user.email)}</span></div>
+    <form id="pedidoform"><div>${lab("Mensagem para o administrador (opcional)","pd-msg")}<textarea class="field" id="pd-msg" rows="3" placeholder="Ex.: sou da equipe de manutenção do turno B">${esc(P.pedido||"")}</textarea></div>
+      <div class="row" style="justify-content:space-between;margin-top:12px"><button type="button" class="btn quiet" data-act="logout">Sair</button><button type="submit" class="btn">${rec?"Pedir acesso de novo":"Enviar mensagem"}</button></div></form></div></div>`;
+}
+main.addEventListener("submit",async e=>{
+  if(e.target.id!=="pedidoform")return;e.preventDefault();
+  const msg=$("#pd-msg").value.trim().slice(0,500),rec=S.perfil&&S.perfil.status==="recusado";
+  try{await FS().collection("perfis").doc(S.user.id).update(rec?{status:"pendente",pedido:msg}:{pedido:msg});
+    S.perfil=Object.assign({},S.perfil,{pedido:msg},rec?{status:"pendente"}:{});lastHTML=null;render();toast(rec?"Pedido enviado de novo.":"Mensagem enviada ao administrador.",{tone:"ok"})}
+  catch(err){toast(authMsg(err))}
+});
+function pedidosCard(){
+  if(!isAdmin())return"";const P=pedidos(),R=S.perfis.filter(u=>u.status==="recusado");
+  if(!P.length&&!R.length)return"";
+  const linha=(u,rec)=>`<div class="trow"><span class="av md" style="background:${HUES[hashN(u.id)%HUES.length]}" aria-hidden="true">${esc(initials(u.nome||u.email))}</span>
+    <div style="min-width:0"><div class="nm">${esc(u.nome||"Sem nome")}</div><div class="em">${esc(u.email)}${u.criado_em?" · pediu em "+fmtDT(u.criado_em):""}</div>${u.pedido?`<p class="small" style="margin:6px 0 0">“${esc(u.pedido)}”</p>`:""}</div>
+    <div class="tm row" style="gap:6px;justify-content:flex-end">${rec?`<button type="button" class="btn quiet sm" data-act="aprovar" data-u="${u.id}">Aprovar mesmo assim</button>`:`<button type="button" class="btn danger sm" data-act="recusar" data-u="${u.id}">Recusar</button><button type="button" class="btn sm" data-act="aprovar" data-u="${u.id}">${ICON.check}Aprovar</button>`}</div></div>`;
+  return`<div class="card" id="pedidos"><div class="card-h"><div><div class="eyebrow" style="color:var(--bad)">${P.length?plural(P.length,"aguardando","aguardando"):"Nenhum pendente"}</div><h2 style="margin-top:4px">Pedidos de acesso</h2></div></div>
+    <div class="team">${P.map(u=>linha(u,false)).join("")||`<p class="tip">Nenhum pedido aguardando.</p>`}</div>
+    ${R.length?`<details class="howto" style="margin:12px 0 0"><summary>${plural(R.length,"pedido recusado","pedidos recusados")}</summary><div class="team">${R.map(u=>linha(u,true)).join("")}</div></details>`:""}</div>`;
+}
+async function decidirPedido(id,status){
+  const u=S.perfis.find(x=>x.id===id);if(!u||!isAdmin())return;
+  try{await FS().collection("perfis").doc(id).update({status});u.status=status;
+    toast(status==="aprovado"?`${u.nome||u.email} foi aprovado e já pode usar o portal.`:`Pedido de ${u.nome||u.email} recusado.`,{tone:status==="aprovado"?"ok":""});lastHTML=null;render()}
+  catch(e){toast(authMsg(e))}
 }
 
 /* ---------- Análise isolada (painel lateral) ---------- */
@@ -2146,6 +2209,7 @@ function drillContent(k,a){
   if(k==="atrasos"||k==="acoes"){const list=allActions().filter(x=>k==="acoes"||isLate(x.a)).sort((x,y)=>(x.a.quando||"9999").localeCompare(y.a.quando||"9999"));
     return{e:"Gestão",t:k==="atrasos"?"Ações em atraso":"Todas as ações",b:tabela(["Ação","Profissional","Usuário","Quem","Prazo","Status"],list.map(({p,a:x})=>`<tr><td>${esc(x.oque||"—")}</td><td>${plink(p)}</td><td>${ulink(p.owner)}</td><td>${esc(x.quem||"—")}</td><td class="num">${fmtDate(x.quando)}</td><td>${isLate(x)?pill("atrasada"):pill(x.status)}</td></tr>`))}}
   if(k==="custos")return{e:"Gestão",t:"Investimento previsto",b:tabela(["Usuário","Profissional","Ações","Custo"],S.profs.map(p=>{const m=metrics(p);return`<tr><td>${ulink(p.owner)}</td><td>${plink(p)}</td><td class="num">${m.acoes}</td><td class="num">${BRL.format(m.custo)}</td></tr>`}))};
+  if(k==="pedidos"){closeDrill();S.view="gestao";savePrefs();render();const el=$("#pedidos");if(el&&el.scrollIntoView)el.scrollIntoView({block:"start",behavior:"smooth"});return null}
   if(k==="alertas")return{e:"Gestão",t:"Todos os alertas",b:`<div class="card"><div class="alerts">${alertas().map(alertHTML).join("")||`<p class="tip">Nenhum alerta.</p>`}</div></div>`};
   return null;
 }
@@ -2218,6 +2282,9 @@ const AULAS=[
     {v:"gestao",h:"priv",n:"Em cada usuário, o administrador vê os profissionais com a evolução, e libera privilégios como ver ou editar a equipe."}]}
 ];
 const AU={c:0,s:0,playing:false,voz:true,timer:null,ok:{}};
+// Arquivos MP4 gerados para cada aula (mesmo nome que o gerador de vídeos usa).
+const aulaArq=i=>`aulas/aula-${String(i+1).padStart(2,"0")}-${AULAS[i].t.normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"")}.mp4?v=1`;
+const DL='<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2.5v8M4.5 7.5L8 11l3.5-3.5M3 13.5h10"/></svg>';
 try{AU.ok=JSON.parse(localStorage.getItem("rotinas.aulas")||"{}")}catch(e){}
 function aulasView(){
   return`<div class="hero"><div><div class="eyebrow">Aprenda em poucos minutos</div><h1>Aulas</h1></div></div><div class="stack"><div id="aula-root"></div></div>`;
@@ -2225,7 +2292,9 @@ function aulasView(){
 function aulaMount(){const root=$("#aula-root");if(!root||root.dataset.on)return;root.dataset.on="1";
   root.innerHTML=`<div class="aulas"><div><div class="player" id="player"><div class="stage" id="stage"></div><div class="caption" id="caption" aria-live="polite"></div>
     <div class="pctl"><button type="button" data-au="prev" aria-label="Cena anterior"><svg viewBox="0 0 16 16" fill="currentColor"><path d="M3 3h2v10H3zM13 3v10L6 8z"/></svg></button><button type="button" data-au="play" id="au-play" aria-label="Reproduzir"></button><button type="button" data-au="next" aria-label="Próxima cena"><svg viewBox="0 0 16 16" fill="currentColor"><path d="M11 3h2v10h-2zM3 3v10l7-5z"/></svg></button><div class="pbar" id="pbar"></div><button type="button" data-au="voz" id="au-voz"></button></div></div>
-    <div class="row" style="margin-top:14px;justify-content:space-between"><div><div class="eyebrow" id="au-cap"></div><h2 id="au-tit" style="margin-top:2px"></h2></div><button type="button" class="btn" data-au="praticar">Praticar agora ${ICON.arrow}</button></div></div>
+    <div class="row" style="margin-top:14px;justify-content:space-between"><div><div class="eyebrow" id="au-cap"></div><h2 id="au-tit" style="margin-top:2px"></h2></div><span class="row"><a class="btn quiet" id="au-dl" href="#" download>${DL}Baixar esta aula</a><button type="button" class="btn" data-au="praticar">Praticar agora ${ICON.arrow}</button></span></div>
+    <div class="card" style="margin-top:18px"><div class="card-h"><div><h3>Baixar as vídeo aulas</h3><p class="muted small" style="margin:4px 0 0">Vídeos MP4 em HD com narração, para assistir sem internet ou compartilhar com a equipe.</p></div><a class="btn" href="aulas/curso-completo-rotinas-de-trabalho.mp4?v=1" download="curso-completo-rotinas-de-trabalho.mp4">${DL}Curso completo</a></div>
+      <div class="dls">${AULAS.map((a,i)=>`<a class="dl" href="${aulaArq(i)}" download="${aulaArq(i).split("/").pop().split("?")[0]}"><span class="cn" style="background:${a.cor}">${i+1}</span><span class="dt2">${esc(a.t)}</span>${DL}</a>`).join("")}</div></div></div>
     <aside class="chapters" aria-label="Capítulos">${AULAS.map((a,i)=>`<button type="button" class="chap" data-au="cap" data-i="${i}"><span class="cn" style="background:${a.cor}">${i+1}</span><span style="min-width:0"><b>${esc(a.t)}</b><small>${esc(a.d)} · ${plural(a.cenas.length,"cena","cenas")}</small></span><span class="seen" data-seen="${a.id}"></span></button>`).join("")}</aside></div>`;
   root.addEventListener("click",e=>{const b=e.target.closest("[data-au]");if(!b)return;const k=b.dataset.au;
     if(k==="play")AU.playing?aulaPause():aulaPlay();
@@ -2269,6 +2338,7 @@ function aulaUI(dur){
   $("#au-play").setAttribute("aria-label",AU.playing?"Pausar":"Reproduzir");
   const temVoz=!!(window.speechSynthesis&&window.SpeechSynthesisUtterance);
   $("#au-voz").innerHTML=temVoz?(AU.voz?"🔊 Voz":"🔇 Sem voz"):"Legendas";$("#au-voz").disabled=!temVoz;
+  const dl=$("#au-dl");if(dl){dl.href=aulaArq(AU.c);dl.setAttribute("download",aulaArq(AU.c).split("/").pop().split("?")[0])}
   $("#au-cap").textContent=`Aula ${AU.c+1} de ${AULAS.length} · cena ${AU.s+1} de ${A.cenas.length}`;$("#au-tit").textContent=A.t;
   document.querySelectorAll(".chap").forEach((b,i)=>b.setAttribute("aria-current",String(i===AU.c)));
   document.querySelectorAll("[data-seen]").forEach(el=>el.textContent=AU.ok[el.dataset.seen]?"✓ Vista":"");
