@@ -503,8 +503,10 @@ const ICON={
 const S={profs:[],cfg:defCfg(),view:"painel",tab:"resumo",method:{},mode:"loading",db:null,ro:false,loaded:false,confirmDel:null,focusSel:null,scrollSel:null,pendingRemote:false,guide:true,howOpen:{},
   fb:false,roAll:false,user:null,perfil:null,perfis:[],hist:[],upd:{},fUser:"",pendingNome:"",auth:{modo:"entrar",msg:"",erro:false,email:""}};
 function defCfg(){return{titulo:"Programa de Melhoria Contínua",empresa:"",responsavel:"",conclusao:""}}
-try{const pr=JSON.parse(localStorage.getItem(PREF_KEY)||"{}");if(pr.view)S.view=pr.view;if(pr.tab)S.tab=pr.tab;if(pr.method)S.method=pr.method;if(pr.guide===false)S.guide=false;}catch(e){}
-function savePrefs(){try{localStorage.setItem(PREF_KEY,JSON.stringify({view:S.view,tab:S.tab,method:S.method,guide:S.guide}))}catch(e){}}
+// Na nuvem, a navegação (aba, método, tela) fica só nesta aba do navegador: outra aba com outro usuário não é afetada.
+function prefStore(){try{return NUVEM_ON?window.sessionStorage:window.localStorage}catch(e){return null}}
+try{const pr=JSON.parse(prefStore().getItem(PREF_KEY)||"{}");if(pr.view)S.view=pr.view;if(pr.tab)S.tab=pr.tab;if(pr.method)S.method=pr.method;if(pr.guide===false)S.guide=false;}catch(e){}
+function savePrefs(){try{prefStore().setItem(PREF_KEY,JSON.stringify({view:S.view,tab:S.tab,method:S.method,guide:S.guide}))}catch(e){}}
 
 /* ---------- Utilidades ---------- */
 const $=(s,r=document)=>r.querySelector(s);
@@ -1723,7 +1725,10 @@ async function bootNuvem(){
     await loadLib("fb-fs",[base+"firebase-firestore-compat.js"],()=>window.firebase&&window.firebase.firestore);
   }catch(e){S.mode="local";loadLocal();sortProfs();S.loaded=true;if(S.tab!=="resumo"&&!cur())S.tab="resumo";savedLabel();render();toast("Sem conexão com o servidor. Os dados ficam só neste navegador por enquanto.");return}
   if(!window.firebase.apps.length)window.firebase.initializeApp(CFG.firebase);
-  S.fb=true;window.firebase.auth().onAuthStateChanged(fu=>{onUser(fu)});
+  const A=window.firebase.auth();
+  // Login por aba: entrar como administrador numa aba não troca a conta de quem está em outra aba do mesmo navegador.
+  try{await A.setPersistence(window.firebase.auth.Auth.Persistence.SESSION)}catch(e){console.error(e)}
+  S.fb=true;A.onAuthStateChanged(fu=>{onUser(fu)});
 }
 async function setPapel(id,papel){
   try{await FS().collection("perfis").doc(id).update({papel})}
