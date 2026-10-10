@@ -437,10 +437,17 @@ select.field{padding:8px 10px;font-size:14px;cursor:pointer}
 .trow .nm{font-weight:600;font-size:16px}
 .trow .em{font-size:12px;color:var(--fg-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .trow select.field,.fsel{width:auto;padding:5px 8px;font-size:13px}
+.tprivs{grid-column:1/-1;display:flex;flex-wrap:wrap;align-items:center;gap:6px 16px;padding-left:54px;font-size:13px}
+.pv{display:inline-flex;align-items:center;gap:6px;cursor:pointer;color:var(--fg)}
+.pv input{width:16px;height:16px;accent-color:var(--accent);margin:0}
+.gbtn{width:100%;padding:11px 18px;border:1px solid var(--line)}
+.gbtn svg{width:18px;height:18px}
+.ou{display:flex;align-items:center;gap:10px;margin:16px 0 12px;font-size:12px;color:var(--fg-2)}
+.ou::before,.ou::after{content:"";flex:1;height:1px;background:var(--line)}
 .spark{display:block;margin-left:auto}
 .spark path{fill:none;stroke:var(--accent);stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
 .spark path.area{fill:var(--accent-soft);stroke:none}
-@media (max-width:640px){.trow{grid-template-columns:auto minmax(0,1fr)}.trow>.tm{grid-column:2;justify-content:flex-start;text-align:left}.trow .spark{margin-left:0}}
+@media (max-width:640px){.tprivs{padding-left:0}.trow{grid-template-columns:auto minmax(0,1fr)}.trow>.tm{grid-column:2;justify-content:flex-start;text-align:left}.trow .spark{margin-left:0}}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 </style>
 
@@ -494,7 +501,7 @@ const ICON={
 
 /* ---------- Estado ---------- */
 const S={profs:[],cfg:defCfg(),view:"painel",tab:"resumo",method:{},mode:"loading",db:null,ro:false,loaded:false,confirmDel:null,focusSel:null,scrollSel:null,pendingRemote:false,guide:true,howOpen:{},
-  fb:false,user:null,perfil:null,perfis:[],hist:[],upd:{},fUser:"",pendingNome:"",auth:{modo:"entrar",msg:"",erro:false,email:""}};
+  fb:false,roAll:false,user:null,perfil:null,perfis:[],hist:[],upd:{},fUser:"",pendingNome:"",auth:{modo:"entrar",msg:"",erro:false,email:""}};
 function defCfg(){return{titulo:"Programa de Melhoria Contínua",empresa:"",responsavel:"",conclusao:""}}
 try{const pr=JSON.parse(localStorage.getItem(PREF_KEY)||"{}");if(pr.view)S.view=pr.view;if(pr.tab)S.tab=pr.tab;if(pr.method)S.method=pr.method;if(pr.guide===false)S.guide=false;}catch(e){}
 function savePrefs(){try{localStorage.setItem(PREF_KEY,JSON.stringify({view:S.view,tab:S.tab,method:S.method,guide:S.guide}))}catch(e){}}
@@ -514,9 +521,17 @@ function wrap(t,n){const w=String(t||"").split(/\s+/);const out=[];let l="";for(
 function setPath(o,path,v){const k=path.split(".");let c=o;for(let i=0;i<k.length-1;i++){c=c[k[i]]}c[k[k.length-1]]=v}
 function hue(p){return HUES[(p.cor||0)%HUES.length]}
 function cur(){return S.profs.find(p=>p.id===S.tab)}
-const isAdmin=()=>S.mode==="nuvem"&&!!S.perfil&&S.perfil.papel==="admin";
-const cfgLocked=()=>S.mode==="nuvem"&&!isAdmin();
-const visProfs=()=>isAdmin()&&S.fUser?S.profs.filter(p=>p.owner===S.fUser):S.profs;
+// Privilégios que o administrador libera por usuário (as mesmas chaves do firestore.rules).
+const PRIVS=[["verEquipe","Ver equipe","Vê os trabalhos e a evolução de todos, sem editar"],["editarEquipe","Editar equipe","Edita os trabalhos dos outros usuários"],["editarPrograma","Dados do programa","Altera título, empresa, responsável e parecer"],["excluir","Excluir","Apaga trabalhos: os próprios, ou os da equipe com Editar equipe"]];
+const nuvem=()=>S.mode==="nuvem";
+const isSuper=()=>nuvem()&&!!S.user&&S.user.verified&&!!CFG.adminEmail&&S.user.email.toLowerCase()===String(CFG.adminEmail).toLowerCase();
+const isAdmin=()=>nuvem()&&(isSuper()||(!!S.perfil&&S.perfil.papel==="admin"));
+const can=k=>!nuvem()||isAdmin()||!!(S.perfil&&S.perfil.priv&&S.perfil.priv[k]);
+const seeTeam=()=>nuvem()&&(can("verEquipe")||can("editarEquipe"));
+const canEdit=p=>!S.roAll&&(!nuvem()||!p||p.owner===(S.user&&S.user.id)||can("editarEquipe"));
+const canDel=p=>!S.roAll&&(!nuvem()||(can("excluir")&&(isAdmin()||p.owner===(S.user&&S.user.id)||can("editarEquipe"))));
+const cfgLocked=()=>nuvem()&&!can("editarPrograma");
+const visProfs=()=>seeTeam()&&S.fUser?S.profs.filter(p=>p.owner===S.fUser):S.profs;
 const exId=id=>S.mode==="nuvem"&&S.user?id+"-"+S.user.id.slice(0,8):id;
 const hashN=s=>{let h=0;for(const c of String(s))h=(h*31+c.charCodeAt(0))>>>0;return h};
 const fmtDT=s=>{const d=new Date(s);return isNaN(d)?"—":d.toLocaleString("pt-BR",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"})};
@@ -615,7 +630,7 @@ function persist(id){
   chains[id]=(chains[id]||Promise.resolve()).then(()=>S.db.doc("profissionais/"+id).set(data)).then(()=>{if(!timers[id])dirty.delete(id);if(!Object.keys(timers).length&&!cfgDirty)savedLabel()}).catch(e=>writeErr(e,id));
 }
 function writeErr(e,id){
-  if(e&&e.code==="invalid_argument"&&!S.ro){S.ro=true;toast("Você tem acesso somente de leitura a este painel.");render()}
+  if(e&&e.code==="invalid_argument"&&!S.roAll){S.roAll=true;toast("Você tem acesso somente de leitura a este painel.");render()}
   else if(e&&e.code==="quota_exceeded")toast("Limite de armazenamento atingido. Remova registros antigos para continuar.");
   else if(e&&e.code==="unavailable"&&id){setTimeout(()=>persist(id),1200+Math.random()*800);return}
   setSave("err","Não salvo");
@@ -667,7 +682,7 @@ function render(){
   const m=$("#main");userChip();
   if(S.mode==="nuvem"&&S.loaded&&!S.user){m.classList.remove("ro");m.innerHTML=authView();if(typeof drawerSync==="function")drawerSync();return}
   if(!S.loaded){m.innerHTML='<div class="loading">Carregando profissionais…</div>';return}
-  m.classList.toggle("ro",S.ro);m.innerHTML=S.view==="relatorio"?reportView():painelView();
+  S.ro=S.roAll||(S.view==="painel"&&S.tab!=="resumo"&&!!cur()&&!canEdit(cur()));m.classList.toggle("ro",S.ro);m.innerHTML=S.view==="relatorio"?reportView():painelView();
   if(S.ro)m.querySelectorAll("input,textarea").forEach(el=>el.readOnly=true);
   if(cfgLocked())m.querySelectorAll('[data-scope="cfg"]').forEach(el=>el.readOnly=true);
   m.querySelectorAll("textarea.field").forEach(autosize);
@@ -681,7 +696,7 @@ function tabsBar(){
   return`<div class="ptabs-wrap"><div class="ptabs" role="tablist" aria-label="Profissionais">
     <button type="button" class="ptab plain" role="tab" data-act="tab" data-id="resumo" aria-selected="${S.tab==="resumo"}">Resumo geral</button>
     ${visProfs().map(p=>`<button type="button" class="ptab" role="tab" data-act="tab" data-id="${p.id}" aria-selected="${S.tab===p.id}">${av(p)}<span data-tablabel="${p.id}">${esc(firstName(p.nome))}</span></button>`).join("")}
-    ${S.ro?"":`<button type="button" class="ptab add" data-act="add-prof">+ Profissional</button>`}
+    ${S.roAll?"":`<button type="button" class="ptab add" data-act="add-prof">+ Profissional</button>`}
   </div></div>`;
 }
 function painelView(){return tabsBar()+(S.tab==="resumo"||!cur()?resumoView():profView(cur()))}
@@ -704,10 +719,10 @@ function resumoView(){
     <div class="kpi"><span class="lbl">Investimento previsto</span><div class="v" style="font-size:24px">${BRL.format(t.custo)}</div><div class="s">soma do “Quanto custa”</div></div>
   </div>`+programGuide()+teamCard();
   const lista=visProfs();
-  h+=`<div class="card" id="lista"><div class="card-h"><h2>${isAdmin()?"Trabalhos":"Profissionais"}</h2>${isAdmin()?`<select class="field fsel" data-fuser aria-label="Filtrar por usuário"><option value="">Todos os usuários</option>${S.perfis.map(u=>`<option value="${u.id}"${S.fUser===u.id?" selected":""}>${esc(u.nome||u.email)}</option>`).join("")}</select>`:`<span class="muted small">Toque para abrir a análise</span>`}</div><div class="plist">
+  h+=`<div class="card" id="lista"><div class="card-h"><h2>${seeTeam()?"Trabalhos":"Profissionais"}</h2>${seeTeam()?`<select class="field fsel" data-fuser aria-label="Filtrar por usuário"><option value="">Todos os usuários</option>${S.perfis.map(u=>`<option value="${u.id}"${S.fUser===u.id?" selected":""}>${esc(u.nome||u.email)}</option>`).join("")}</select>`:`<span class="muted small">Toque para abrir a análise</span>`}</div><div class="plist">
     ${lista.map(p=>{const m=metrics(p),ns=nextStep(p);return`<button type="button" class="prow" data-act="tab" data-id="${p.id}" data-m="${ns.m||""}">${av(p,"md")}
       <div style="min-width:0"><div class="nm">${esc(p.nome||"Sem nome")}</div><div class="pb">${esc([p.cargo,p.setor].filter(Boolean).join(" · ")||"—")}${p.problema?" — "+esc(p.problema):""}</div>
-      <div class="badges">${isAdmin()?`<span class="badge">${esc(ownerName(p.owner))}</span>`:""}<span class="badge fca">FCA ${m.fca}</span><span class="badge pdca">PDCA ${m.pdcaDone}/4</span><span class="badge ish">Ishikawa ${m.causas}</span><span class="badge w5">5W2H ${m.conc}/${m.acoes}</span>${m.late?`<span class="badge" style="color:var(--bad)">${m.late} em atraso</span>`:""}</div>
+      <div class="badges">${seeTeam()?`<span class="badge">${esc(ownerName(p.owner))}</span>`:""}<span class="badge fca">FCA ${m.fca}</span><span class="badge pdca">PDCA ${m.pdcaDone}/4</span><span class="badge ish">Ishikawa ${m.causas}</span><span class="badge w5">5W2H ${m.conc}/${m.acoes}</span>${m.late?`<span class="badge" style="color:var(--bad)">${m.late} em atraso</span>`:""}</div>
       <div class="nexthint${ns.done?" ok":ns.tone==="bad"?" bad":""}">${ns.done?"Ciclo completo":(ns.n<5?"Próximo passo: ":"Acompanhar: ")+esc(ns.title)}</div></div>
       ${ring(m.prog,52)}</button>`}).join("")||`<p class="tip">Nenhum trabalho deste usuário.</p>`}
   </div></div>`;
@@ -880,12 +895,13 @@ function autoText(p,k){
 function profView(p){
   const m=metrics(p);let mt=S.method[p.id];if(!ORDER.includes(mt))mt="fca";
   const del=S.confirmDel===p.id?`<button type="button" class="btn danger sm" data-act="del-confirm">Excluir definitivamente</button><button type="button" class="btn quiet sm" data-act="del-cancel">Cancelar</button>`:`<button type="button" class="btn quiet sm" data-act="del-prof">${ICON.trash}Excluir</button>`;
-  return`<div class="stack"><div class="card"><div class="profile">${av(p,"lg")}
+  const alheio=nuvem()&&S.user&&p.owner&&p.owner!==S.user.id;
+  return`<div class="stack">${alheio?`<p class="tip" role="status"><b>Trabalho de ${esc(ownerName(p.owner))}</b>${S.ro?" · somente leitura: você pode acompanhar, mas não editar.":isAdmin()?" · você pode editar como administrador.":" · você pode editar porque tem o privilégio Editar equipe."}</p>`:""}<div class="card"><div class="profile">${av(p,"lg")}
     <div style="min-width:0"><input class="field title" id="${fid("nome")}" data-bind="nome" value="${esc(p.nome)}" placeholder="Nome do profissional" aria-label="Nome">
       <div class="meta"><input class="field sub" id="${fid("cargo")}" data-bind="cargo" value="${esc(p.cargo)}" placeholder="Cargo" aria-label="Cargo"><input class="field sub" id="${fid("setor")}" data-bind="setor" value="${esc(p.setor)}" placeholder="Setor / área" aria-label="Setor"></div></div>
     <div class="ringbox">${ring(m.prog,76)}<div class="muted small">maturidade</div></div></div>
     <div style="margin-top:18px">${lab("Problema ou oportunidade de melhoria",fid("problema"))}${ta("problema",p.problema,"Ex.: retrabalho de 12% nas ordens de produção do turno B",2)}${S.guide?`<p class="hint">Uma frase com o que acontece, onde e quanto. Ela é o ponto de partida de todas as análises.</p>`:""}</div>
-    <div class="row" style="justify-content:flex-end;margin-top:14px">${S.guide?"":`<button type="button" class="btn ghost sm" data-act="guide-toggle">Mostrar guia</button>`}${S.ro?"":del}</div></div>
+    <div class="row" style="justify-content:flex-end;margin-top:14px">${S.guide?"":`<button type="button" class="btn ghost sm" data-act="guide-toggle">Mostrar guia</button>`}${canDel(p)?del:""}</div></div>
   ${guideCard(p)}
   <div class="mseg" role="tablist" aria-label="Métodos" data-live="mseg">${msegInner(p,mt)}</div>
   <div class="card" id="methodcard">${mt==="pdca"?pdcaView(p):mt==="ish"?ishView(p):mt==="w5"?w5View(p,m):fcaView(p)}<div data-live="foot">${mfoot(p,mt)}</div></div></div>`;
@@ -1097,6 +1113,7 @@ function act(a,b){
     case"export-data":exportData();break;
     case"import-data":if(!S.ro)$("#importfile").click();break;
     case"logout":if(S.fb)window.firebase.auth().signOut();break;
+    case"auth-google":if(S.fb)entrarGoogle();break;
     case"auth-modo":S.auth={modo:S.auth.modo==="cadastrar"?"entrar":"cadastrar",msg:"",erro:false,email:(($("#au-email")||{}).value||"").trim()};render();break;
     case"auth-reset":{const em=(($("#au-email")||{}).value||"").trim();
       if(!em){S.auth={modo:"entrar",msg:"Digite o seu e-mail acima e toque de novo em Esqueci a senha.",erro:true,email:""};render();break}
@@ -1122,6 +1139,7 @@ main.addEventListener("input",e=>{
 main.addEventListener("change",e=>{const t=e.target;if(!t.dataset)return;
   if(t.dataset.fuser!=null){S.fUser=t.value;render();return}
   if(t.dataset.papel){setPapel(t.dataset.papel,t.value);return}
+  if(t.dataset.priv){setPriv(t.dataset.u,t.dataset.priv,t.checked);return}
   if(t.dataset.rerender==="all"){S.focusSel=null;render();return}
   if(t.dataset.classify!=null&&t.value){const i=+t.dataset.classify,k=t.value,lab=CATS.find(c=>c[0]===k)[1];mutate(p=>{const c=p.fca[i]&&p.fca[i].causa.trim();if(c)p.ishikawa.causas[k].push(c)});toast("Causa adicionada em "+lab)}
 });
@@ -1591,11 +1609,13 @@ function userChip(){
   const el=$("#userchip");if(!el)return;
   if(S.mode!=="nuvem"||!S.user){el.hidden=true;el.innerHTML="";return}
   el.hidden=false;
-  el.innerHTML=`<span class="rl">${isAdmin()?"Admin":"Usuário"}</span><span class="un">${esc((S.perfil&&S.perfil.nome)||S.user.email)}</span><button type="button" class="btn quiet sm" data-act="logout">Sair</button>`;
+  el.innerHTML=`<span class="rl">${isAdmin()?"Admin":seeTeam()?"Supervisão":"Usuário"}</span><span class="un">${esc((S.perfil&&S.perfil.nome)||S.user.email)}</span><button type="button" class="btn quiet sm" data-act="logout">Sair</button>`;
 }
 function authView(){
   const a=S.auth,cad=a.modo==="cadastrar",title=cad?"Criar conta":"Entrar";
-  return`<div class="auth"><div class="card"><div class="eyebrow">Painel 5W2H</div><h2 style="margin:4px 0 6px">${title}</h2><p class="muted small" style="margin:0 0 18px">${cad?"Cada usuário vê e edita só os próprios trabalhos. O administrador acompanha a evolução de todos.":"Use o e-mail e a senha cadastrados."}</p>
+  return`<div class="auth"><div class="card"><div class="eyebrow">Painel 5W2H</div><h2 style="margin:4px 0 6px">${title}</h2><p class="muted small" style="margin:0 0 18px">${cad?"Cada usuário vê e edita só os próprios trabalhos. O administrador acompanha a evolução de todos.":"Entre com a sua conta Google ou com e-mail e senha."}</p>
+  <button type="button" class="btn quiet gbtn" data-act="auth-google"><svg viewBox="0 0 48 48" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>${cad?"Criar conta com Google":"Entrar com Google"}</button>
+  <div class="ou"><span>ou com e-mail</span></div>
   <form id="authform" data-modo="${a.modo}">
     ${cad?`<div>${lab("Nome","au-nome")}<input class="field" id="au-nome" autocomplete="name" required></div>`:""}
     <div>${lab("E-mail","au-email")}<input class="field" id="au-email" type="email" autocomplete="email" value="${esc(a.email||"")}" required></div>
@@ -1608,7 +1628,17 @@ const AUTHMSG={"auth/invalid-credential":"E-mail ou senha incorretos.","auth/inv
   "auth/email-already-in-use":"Este e-mail já tem conta. Use Entrar.","auth/weak-password":"A senha precisa ter pelo menos 6 caracteres.","auth/invalid-email":"E-mail inválido.","auth/missing-email":"Informe o e-mail.",
   "auth/too-many-requests":"Muitas tentativas seguidas. Aguarde alguns minutos e tente de novo.","auth/network-request-failed":"Sem conexão com o servidor. Verifique a internet.",
   "auth/operation-not-allowed":"O login por e-mail e senha ainda não foi ativado no Firebase.","auth/configuration-not-found":"O login por e-mail e senha ainda não foi ativado no Firebase.",
-  "permission-denied":"Você não tem permissão para esta ação."};
+  "permission-denied":"Você não tem permissão para esta ação.",
+  "auth/account-exists-with-different-credential":"Este e-mail já tem conta com senha. Entre com e-mail e senha.","auth/unauthorized-domain":"Este endereço não está autorizado para entrar com Google.",
+  "auth/popup-blocked":"O navegador bloqueou a janela do Google. Permita pop-ups para este site e tente de novo."};
+function entrarGoogle(){
+  const A=window.firebase.auth(),prov=new window.firebase.auth.GoogleAuthProvider();prov.setCustomParameters({prompt:"select_account"});
+  S.auth=Object.assign({},S.auth,{msg:"",erro:false});
+  A.signInWithPopup(prov).catch(e=>{
+    if(e&&(e.code==="auth/popup-closed-by-user"||e.code==="auth/cancelled-popup-request"))return;
+    if(e&&e.code==="auth/popup-blocked"){A.signInWithRedirect(prov).catch(x=>{S.auth=Object.assign({},S.auth,{msg:authMsg(x),erro:true});render()});return}
+    S.auth=Object.assign({},S.auth,{msg:authMsg(e),erro:true});render()});
+}
 function authMsg(e){return AUTHMSG[String(e&&e.code||"")]||String(e&&e.message||"")||"Não foi possível concluir. Tente de novo."}
 main.addEventListener("submit",async e=>{
   const f=e.target;if(f.id!=="authform")return;e.preventDefault();
@@ -1632,16 +1662,20 @@ function nuvemErr(e,id){
 function mergeHist(h){const i=S.hist.findIndex(x=>x.prof_id===h.prof_id&&x.dia===h.dia);if(i>=0)S.hist[i]=h;else S.hist.push(h)}
 function rowProf(r){const p=norm(r.id,r.dados);p.owner=r.owner;S.upd[r.id]=r.atualizado_em;return p}
 function histOf(p){const m=metrics(p);return{prof_id:p.id,owner:p.owner,dia:today(),maturidade:m.prog,acoes:m.acoes,concluidas:m.conc}}
+const PRIV0={verEquipe:false,editarEquipe:false,editarPrograma:false,excluir:false};
 async function ensurePerfil(fu){
   const ref=FS().collection("perfis").doc(fu.uid),snap=await ref.get();
-  if(snap.exists)return Object.assign({id:fu.uid},snap.data());
-  const base={nome:S.pendingNome||fu.displayName||"",email:fu.email||"",criado_em:new Date().toISOString()};
-  // O primeiro a entrar reivindica o papel de administrador; as regras só aceitam isso uma vez.
-  try{const b=FS().batch();b.set(FS().collection("sistema").doc("admin"),{uid:fu.uid});b.set(ref,Object.assign({papel:"admin"},base));await b.commit();return Object.assign({id:fu.uid,papel:"admin"},base)}
-  catch(e){await ref.set(Object.assign({papel:"usuario"},base));return Object.assign({id:fu.uid,papel:"usuario"},base)}
+  // Só o e-mail do administrador principal, verificado, nasce como admin (o firestore.rules confere o mesmo).
+  if(snap.exists){const d=Object.assign({id:fu.uid},snap.data());
+    if(isSuper()&&d.papel!=="admin"){try{await ref.update({papel:"admin"});d.papel="admin"}catch(e){}}
+    return d}
+  const d={nome:S.pendingNome||fu.displayName||"",email:fu.email||"",papel:isSuper()?"admin":"usuario",criado_em:new Date().toISOString(),priv:Object.assign({},PRIV0)};
+  await ref.set(d);return Object.assign({id:fu.uid},d);
 }
+// Quando o administrador muda os acessos de alguém, a sessão dessa pessoa recarrega com os novos acessos.
+function recarregarAcessos(fu){if(Object.keys(timers).length||dirty.size){setTimeout(()=>recarregarAcessos(fu),800);return}S.user=null;onUser(fu,true)}
 async function nuvemLoad(){
-  if(isAdmin()){
+  if(seeTeam()){
     const d=new Date();d.setDate(d.getDate()-90);
     const[pf,hs]=await Promise.all([FS().collection("perfis").get(),FS().collection("historico").where("dia",">=",d.toISOString().slice(0,10)).get()]);
     S.perfis=pf.docs.map(x=>Object.assign({id:x.id},x.data()));S.hist=hs.docs.map(x=>x.data());
@@ -1654,7 +1688,7 @@ function onNuvemProfs(snap){
   S.profs.forEach(p=>{if(!seen.has(p.id)&&dirty.has(p.id))next.push(p)});
   const before=JSON.stringify(S.profs);S.profs=next;sortProfs();
   const first=!S.loaded;S.loaded=true;
-  if(isAdmin()&&!first){let novoDono=false;
+  if(seeTeam()&&!first){let novoDono=false;
     snap.docChanges().forEach(ch=>{if(ch.type==="removed"||ch.doc.metadata.hasPendingWrites)return;const p=S.profs.find(x=>x.id===ch.doc.id);if(!p)return;mergeHist(histOf(p));if(!S.perfis.some(u=>u.id===p.owner))novoDono=true});
     if(novoDono)nuvemLoad().then(remoteRender).catch(()=>{});}
   if(S.tab!=="resumo"&&!cur())S.tab="resumo";
@@ -1662,17 +1696,23 @@ function onNuvemProfs(snap){
 }
 function onNuvemCfg(d){if(cfgDirty)return;const n=Object.assign(defCfg(),d.exists&&d.data().dados||{});if(JSON.stringify(n)!==JSON.stringify(S.cfg)){S.cfg=n;if(S.loaded)remoteRender()}}
 let nuvemUnsub=[];
-async function onUser(fu){
+async function onUser(fu,manterAba){
   if(fu&&S.user&&fu.uid===S.user.id&&S.loaded)return;
   nuvemUnsub.forEach(f=>f());nuvemUnsub=[];
-  S.user=fu?{id:fu.uid,email:fu.email||""}:null;S.profs=[];S.perfil=null;S.perfis=[];S.hist=[];S.upd={};S.fUser="";dirty.clear();S.cfg=defCfg();
+  // Cada login começa no Resumo geral: a aba guardada pode ser de outra pessoa que usou este navegador.
+  if(!manterAba){S.tab="resumo";S.view="painel";savePrefs()}
+  S.user=fu?{id:fu.uid,email:fu.email||"",verified:!!fu.emailVerified}:null;S.profs=[];S.perfil=null;S.perfis=[];S.hist=[];S.upd={};S.fUser="";dirty.clear();S.cfg=defCfg();
   if(!fu){S.loaded=true;savedLabel();render();return}
   S.loaded=false;setSave("busy","Carregando…");render();
   try{S.perfil=await ensurePerfil(fu);S.pendingNome="";await nuvemLoad()}
   catch(e){console.error(e);S.perfil=S.perfil||{id:fu.uid,nome:"",email:fu.email||"",papel:"usuario"};toast("Não foi possível carregar o seu perfil: "+authMsg(e))}
   const col=FS().collection("profissionais");
-  nuvemUnsub.push((isAdmin()?col:col.where("owner","==",fu.uid)).onSnapshot(onNuvemProfs,e=>{nuvemErr(e);S.loaded=true;render()}));
+  nuvemUnsub.push((seeTeam()?col:col.where("owner","==",fu.uid)).onSnapshot(onNuvemProfs,e=>{nuvemErr(e);S.loaded=true;render()}));
   nuvemUnsub.push(FS().collection("config").doc("geral").onSnapshot(onNuvemCfg,()=>{}));
+  const chave=x=>JSON.stringify([x&&x.papel,x&&x.priv]);
+  nuvemUnsub.push(FS().collection("perfis").doc(fu.uid).onSnapshot(d=>{
+    if(!d.exists||!S.perfil||!S.user||S.user.id!==fu.uid)return;const n=Object.assign({id:fu.uid},d.data());
+    if(chave(n)!==chave(S.perfil)){S.perfil=n;toast("Os seus acessos foram atualizados pelo administrador.");recarregarAcessos(fu)}else S.perfil=n},()=>{}));
 }
 async function bootNuvem(){
   S.mode="nuvem";setSave("busy","Conectando…");
@@ -1691,6 +1731,13 @@ async function setPapel(id,papel){
   const u=S.perfis.find(x=>x.id===id);if(u)u.papel=papel;
   toast(papel==="admin"?"Usuário promovido a administrador":"Acesso de administrador removido");render();
 }
+async function setPriv(id,k,v){
+  const u=S.perfis.find(x=>x.id===id);if(!u)return;
+  const priv=Object.assign({},PRIV0,u.priv||{},{[k]:v});
+  try{await FS().collection("perfis").doc(id).update({priv});u.priv=priv;toast((v?"Liberado: ":"Removido: ")+PRIVS.find(x=>x[0]===k)[1]+" para "+(u.nome||u.email))}
+  catch(e){toast(authMsg(e))}
+  render();
+}
 function userSeries(uid){
   const H=S.hist.filter(h=>h.owner===uid&&S.profs.some(p=>p.id===h.prof_id));if(!H.length)return[];
   const days=[...new Set(H.map(h=>h.dia))].sort(),last={};
@@ -1702,17 +1749,24 @@ function spark(v){
   return`<svg class="spark" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" role="img" aria-label="Maturidade de ${Math.round(v[0])}% para ${Math.round(v[v.length-1])}%"><path class="area" d="${d}L${pts[pts.length-1][0].toFixed(1)} ${h}L${pts[0][0].toFixed(1)} ${h}Z"/><path d="${d}"/></svg>`;
 }
 function teamCard(){
-  if(!isAdmin())return"";
+  if(!seeTeam())return"";
   const users=S.perfis.slice().sort((a,b)=>String(a.nome||a.email).localeCompare(String(b.nome||b.email)));
-  return`<div class="card" id="equipe"><div class="card-h"><div><div class="eyebrow">Administrador</div><h2 style="margin-top:4px">Evolução da equipe</h2></div><button type="button" class="btn quiet sm" data-act="equipe-refresh">Atualizar</button></div>
+  const adm=isAdmin(),principal=u=>!!CFG.adminEmail&&String(u.email||"").toLowerCase()===String(CFG.adminEmail).toLowerCase();
+  return`<div class="card" id="equipe"><div class="card-h"><div><div class="eyebrow">${adm?"Administrador":"Supervisão"}</div><h2 style="margin-top:4px">Evolução da equipe</h2></div><button type="button" class="btn quiet sm" data-act="equipe-refresh">Atualizar</button></div>
+  ${adm?`<p class="small muted" style="margin:-6px 0 8px">Marque os privilégios de cada usuário. A mudança vale na hora, inclusive para quem estiver com o painel aberto.</p>`:""}
   <div class="team">${users.map(u=>{
     const ps=S.profs.filter(p=>p.owner===u.id),ms=ps.map(metrics),sum=k=>ms.reduce((a,m)=>a+m[k],0);
     const prog=ms.length?Math.round(sum("prog")/ms.length):0,last=ps.map(p=>S.upd[p.id]||"").sort().pop(),nm=u.nome||u.email||"Usuário";
+    const eAdmin=u.papel==="admin"||principal(u),ativos=PRIVS.filter(([k])=>u.priv&&u.priv[k]);
+    const privHTML=eAdmin?`<span class="muted small">Acesso total como administrador.</span>`
+      :adm?PRIVS.map(([k,l,d])=>`<label class="pv" title="${esc(d)}"><input type="checkbox" data-priv="${k}" data-u="${u.id}"${u.priv&&u.priv[k]?" checked":""}>${l}</label>`).join("")
+      :ativos.length?ativos.map(([,l])=>`<span class="badge">${l}</span>`).join(""):`<span class="muted small">Sem privilégios extras.</span>`;
     return`<div class="trow"><span class="av md" style="background:${HUES[hashN(u.id)%HUES.length]}" aria-hidden="true">${esc(initials(nm))}</span>
-    <div style="min-width:0"><div class="nm">${esc(u.nome||"Sem nome")}${u.id===S.user.id?' <span class="muted small">(você)</span>':""}${u.papel==="admin"?' <span class="badge">Admin</span>':""}</div><div class="em">${esc(u.email)}</div>
+    <div style="min-width:0"><div class="nm">${esc(u.nome||"Sem nome")}${u.id===S.user.id?' <span class="muted small">(você)</span>':""}${principal(u)?' <span class="badge">Admin principal</span>':u.papel==="admin"?' <span class="badge">Admin</span>':""}</div><div class="em">${esc(u.email)}</div>
       <div class="badges"><span class="badge">${plural(ps.length,"trabalho","trabalhos")}</span><span class="badge w5">Ações ${sum("conc")}/${sum("acoes")}</span>${sum("late")?`<span class="badge" style="color:var(--bad)">${sum("late")} em atraso</span>`:""}<span class="badge">${last?"Atualizado "+fmtDT(last):"Sem atividade"}</span></div></div>
     <div class="tm" style="text-align:right">${spark(userSeries(u.id))}<div class="small" style="margin-top:2px"><b>${prog}%</b> <span class="muted">maturidade</span></div></div>
-    <div class="tm row" style="gap:6px;justify-content:flex-end">${ps.length?`<button type="button" class="btn ghost sm" data-act="f-user" data-u="${u.id}">Ver trabalhos</button>`:""}${u.id===S.user.id?"":`<select class="field" data-papel="${u.id}" aria-label="Papel de ${esc(nm)}"><option value="usuario"${u.papel!=="admin"?" selected":""}>Usuário</option><option value="admin"${u.papel==="admin"?" selected":""}>Admin</option></select>`}</div></div>`}).join("")||`<p class="tip">Nenhum usuário cadastrado ainda.</p>`}</div>
+    <div class="tm row" style="gap:6px;justify-content:flex-end">${ps.length?`<button type="button" class="btn ghost sm" data-act="f-user" data-u="${u.id}">Ver trabalhos</button>`:""}${!adm||u.id===S.user.id||principal(u)?"":`<select class="field" data-papel="${u.id}" aria-label="Papel de ${esc(nm)}"><option value="usuario"${u.papel!=="admin"?" selected":""}>Usuário</option><option value="admin"${u.papel==="admin"?" selected":""}>Admin</option></select>`}</div>
+    <div class="tprivs" role="group" aria-label="Privilégios de ${esc(nm)}">${privHTML}</div></div>`}).join("")||`<p class="tip">Nenhum usuário cadastrado ainda.</p>`}</div>
   <p class="small muted" style="margin:12px 0 0">A curva mostra a maturidade média dos trabalhos de cada usuário nos últimos 90 dias. Novos usuários aparecem aqui depois de criarem a conta.</p></div>`;
 }
 
@@ -1725,7 +1779,7 @@ async function boot(){
   if(window.claude&&window.claude.use){try{[db,user]=await Promise.all([window.claude.use("db"),window.claude.use("user")])}catch(e){}}
   if(db){
     S.mode="db";S.db=db;
-    try{if(user&&user.can){const w=await user.can("data.write");if(w===false)S.ro=true}}catch(e){}
+    try{if(user&&user.can){const w=await user.can("data.write");if(w===false)S.roAll=true}}catch(e){}
     savedLabel();
     db.collection("profissionais").onSnapshot(onProfs,e=>{S.loaded=true;setSave("err","Sem conexão");render()});
     db.doc("config/geral").onSnapshot(onCfg,()=>{});

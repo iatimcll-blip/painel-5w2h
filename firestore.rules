@@ -1,61 +1,75 @@
 rules_version = '2';
 // Painel 5W2H — regras de acesso do Firestore.
-// Usuário vê e edita só os próprios trabalhos; o administrador vê e edita todos.
-// O primeiro a entrar reivindica o papel de administrador (documento sistema/admin, criado uma única vez).
+// Administrador principal fixo: iatimcll@gmail.com (e-mail verificado, por exemplo ao entrar com Google).
+// Ele pode promover outros administradores e liberar privilégios por usuário:
+//   verEquipe      — ver os trabalhos e a evolução de todos (sem editar)
+//   editarEquipe   — editar os trabalhos dos outros (inclui ver)
+//   editarPrograma — alterar título, empresa, responsável e parecer do programa
+//   excluir        — apagar trabalhos (os próprios, ou os da equipe se também tiver editarEquipe)
+// Sem privilégios, o usuário vê e edita só os próprios trabalhos e não apaga nada.
 service cloud.firestore {
   match /databases/{database}/documents {
     function signedIn() { return request.auth != null; }
     function me() { return request.auth.uid; }
-    function perfilPath(uid) { return /databases/$(database)/documents/perfis/$(uid); }
-    function isAdmin() {
-      return signedIn() && exists(perfilPath(me())) && get(perfilPath(me())).data.papel == 'admin';
+    function superAdmin() {
+      return signedIn() && request.auth.token.email == 'iatimcll@gmail.com'
+        && request.auth.token.email_verified == true;
     }
-    function dono(data) { return data.owner == me() || isAdmin(); }
-
-    match /sistema/admin {
-      allow read: if signedIn();
-      allow create: if signedIn()
-        && request.resource.data.keys().hasOnly(['uid'])
-        && request.resource.data.uid == me();
-      allow update, delete: if false;
+    function temPerfil() { return exists(/databases/$(database)/documents/perfis/$(me())); }
+    function perfil() { return get(/databases/$(database)/documents/perfis/$(me())).data; }
+    function isAdmin() { return superAdmin() || (signedIn() && temPerfil() && perfil().papel == 'admin'); }
+    function priv(k) { return signedIn() && temPerfil() && perfil().get('priv', {}).get(k, false) == true; }
+    function verEquipe() { return isAdmin() || priv('verEquipe') || priv('editarEquipe'); }
+    function editarEquipe() { return isAdmin() || priv('editarEquipe'); }
+    function podeExcluir(data) {
+      return isAdmin() || (priv('excluir') && (data.owner == me() || priv('editarEquipe')));
+    }
+    function semPrivilegios() {
+      return request.resource.data.priv == {'verEquipe': false, 'editarEquipe': false, 'editarPrograma': false, 'excluir': false};
+    }
+    function privValidos() {
+      return request.resource.data.priv.keys().hasOnly(['verEquipe', 'editarEquipe', 'editarPrograma', 'excluir'])
+        && request.resource.data.priv.values().hasOnly([true, false]);
     }
 
     match /perfis/{uid} {
-      allow read: if signedIn() && (uid == me() || isAdmin());
+      allow read: if signedIn() && (uid == me() || verEquipe());
       allow create: if signedIn() && uid == me()
-        && request.resource.data.keys().hasOnly(['nome', 'email', 'papel', 'criado_em'])
+        && request.resource.data.keys().hasOnly(['nome', 'email', 'papel', 'criado_em', 'priv'])
         && request.resource.data.email == request.auth.token.email
-        && (request.resource.data.papel == 'usuario'
-          || (request.resource.data.papel == 'admin'
-            && !exists(/databases/$(database)/documents/sistema/admin)
-            && getAfter(/databases/$(database)/documents/sistema/admin).data.uid == me()));
+        && semPrivilegios()
+        && (request.resource.data.papel == 'usuario' || (request.resource.data.papel == 'admin' && superAdmin()));
       allow update: if signedIn() && (
+        // a própria pessoa muda só o nome; o administrador principal pode garantir o próprio papel de admin
         (uid == me() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['nome']))
-        || (isAdmin() && uid != me()
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['papel'])
-          && request.resource.data.papel in ['usuario', 'admin']));
+        || (uid == me() && superAdmin() && request.resource.data.papel == 'admin'
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['nome', 'papel']))
+        // administradores mudam papel e privilégios dos outros, nunca do administrador principal
+        || (isAdmin() && uid != me() && resource.data.email != 'iatimcll@gmail.com'
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['papel', 'priv'])
+          && request.resource.data.papel in ['usuario', 'admin'] && privValidos()));
       allow delete: if false;
     }
 
     match /profissionais/{id} {
-      allow read: if signedIn() && dono(resource.data);
-      allow create: if signedIn() && dono(request.resource.data);
-      allow update: if signedIn() && dono(resource.data)
+      allow read: if signedIn() && (resource.data.owner == me() || verEquipe());
+      allow create: if signedIn() && (request.resource.data.owner == me() || isAdmin());
+      allow update: if signedIn() && (resource.data.owner == me() || editarEquipe())
         && request.resource.data.owner == resource.data.owner;
-      allow delete: if signedIn() && dono(resource.data);
+      allow delete: if signedIn() && podeExcluir(resource.data);
     }
 
     match /historico/{id} {
-      allow read: if signedIn() && dono(resource.data);
-      allow create: if signedIn() && dono(request.resource.data);
-      allow update: if signedIn() && dono(resource.data)
+      allow read: if signedIn() && (resource.data.owner == me() || verEquipe());
+      allow create: if signedIn() && (request.resource.data.owner == me() || editarEquipe());
+      allow update: if signedIn() && (resource.data.owner == me() || editarEquipe())
         && request.resource.data.owner == resource.data.owner;
-      allow delete: if signedIn() && dono(resource.data);
+      allow delete: if signedIn() && podeExcluir(resource.data);
     }
 
     match /config/{id} {
       allow read: if signedIn();
-      allow write: if isAdmin();
+      allow write: if isAdmin() || priv('editarPrograma');
     }
   }
 }

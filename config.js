@@ -2,6 +2,8 @@
 // Enquanto "firebase" estiver vazio, o painel salva só no navegador.
 // Esses valores são públicos por natureza: quem protege os dados são as regras do firestore.rules.
 window.PAINEL_CONFIG = {
+  // Administrador principal (o mesmo e-mail fixado no firestore.rules).
+  adminEmail: "iatimcll@gmail.com",
   firebase: {
     apiKey: "AIzaSyCyihRqPzMrlLxXSvyv8lRiMIII954DufI",
     authDomain: "w2h-c2547.firebaseapp.com",
