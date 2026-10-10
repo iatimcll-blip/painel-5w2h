@@ -3,11 +3,11 @@
 // Esses valores são públicos por natureza: quem protege os dados são as regras do firestore.rules.
 window.PAINEL_CONFIG = {
   firebase: {
-    apiKey: "AIzaSyBr3lb8UIIzAucaxeLWFGlgZ5OV2fltLC0",
-    authDomain: "painel-5w2h-u5yxt.firebaseapp.com",
-    projectId: "painel-5w2h-u5yxt",
-    storageBucket: "painel-5w2h-u5yxt.firebasestorage.app",
-    messagingSenderId: "521555607342",
-    appId: "1:521555607342:web:19d501f9df1a4a2b5344bf"
+    apiKey: "AIzaSyCyihRqPzMrlLxXSvyv8lRiMIII954DufI",
+    authDomain: "w2h-c2547.firebaseapp.com",
+    projectId: "w2h-c2547",
+    storageBucket: "w2h-c2547.firebasestorage.app",
+    messagingSenderId: "735583737541",
+    appId: "1:735583737541:web:6edb13632fa0492ee342ac"
   }
 };
