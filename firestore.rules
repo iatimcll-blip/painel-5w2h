@@ -1,0 +1,61 @@
+rules_version = '2';
+// Painel 5W2H — regras de acesso do Firestore.
+// Usuário vê e edita só os próprios trabalhos; o administrador vê e edita todos.
+// O primeiro a entrar reivindica o papel de administrador (documento sistema/admin, criado uma única vez).
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function me() { return request.auth.uid; }
+    function perfilPath(uid) { return /databases/$(database)/documents/perfis/$(uid); }
+    function isAdmin() {
+      return signedIn() && exists(perfilPath(me())) && get(perfilPath(me())).data.papel == 'admin';
+    }
+    function dono(data) { return data.owner == me() || isAdmin(); }
+
+    match /sistema/admin {
+      allow read: if signedIn();
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly(['uid'])
+        && request.resource.data.uid == me();
+      allow update, delete: if false;
+    }
+
+    match /perfis/{uid} {
+      allow read: if signedIn() && (uid == me() || isAdmin());
+      allow create: if signedIn() && uid == me()
+        && request.resource.data.keys().hasOnly(['nome', 'email', 'papel', 'criado_em'])
+        && request.resource.data.email == request.auth.token.email
+        && (request.resource.data.papel == 'usuario'
+          || (request.resource.data.papel == 'admin'
+            && !exists(/databases/$(database)/documents/sistema/admin)
+            && getAfter(/databases/$(database)/documents/sistema/admin).data.uid == me()));
+      allow update: if signedIn() && (
+        (uid == me() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['nome']))
+        || (isAdmin() && uid != me()
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['papel'])
+          && request.resource.data.papel in ['usuario', 'admin']));
+      allow delete: if false;
+    }
+
+    match /profissionais/{id} {
+      allow read: if signedIn() && dono(resource.data);
+      allow create: if signedIn() && dono(request.resource.data);
+      allow update: if signedIn() && dono(resource.data)
+        && request.resource.data.owner == resource.data.owner;
+      allow delete: if signedIn() && dono(resource.data);
+    }
+
+    match /historico/{id} {
+      allow read: if signedIn() && dono(resource.data);
+      allow create: if signedIn() && dono(request.resource.data);
+      allow update: if signedIn() && dono(resource.data)
+        && request.resource.data.owner == resource.data.owner;
+      allow delete: if signedIn() && dono(resource.data);
+    }
+
+    match /config/{id} {
+      allow read: if signedIn();
+      allow write: if isAdmin();
+    }
+  }
+}
