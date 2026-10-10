@@ -422,6 +422,25 @@ select.field{padding:8px 10px;font-size:14px;cursor:pointer}
 @media print{.aifab,.aidrawer{display:none!important}}
 @media (max-width:600px){body.ai-open .toast{bottom:auto;top:calc(16px + env(safe-area-inset-top,0px))}}
 .loading{color:var(--fg-2);padding:40px 0;text-align:center}
+
+/* Perfis e acesso */
+.userchip{display:flex;align-items:center;gap:8px;font-size:13px;min-width:0}
+.userchip .rl{font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--accent);background:var(--accent-soft);border-radius:6px;padding:2px 7px;flex:none}
+.userchip .un{color:var(--fg-2);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.auth{max-width:440px;margin:40px auto 96px}
+.auth form{display:flex;flex-direction:column;gap:12px}
+.auth .msg-err{color:var(--bad);font-size:13px;margin:0}
+.auth .msg-ok{color:var(--ok);font-size:13px;margin:0}
+.team{display:flex;flex-direction:column}
+.trow{display:grid;grid-template-columns:auto minmax(0,1fr) auto auto;gap:14px;align-items:center;padding:14px 4px;border-bottom:1px solid var(--line)}
+.trow:last-child{border-bottom:0}
+.trow .nm{font-weight:600;font-size:16px}
+.trow .em{font-size:12px;color:var(--fg-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.trow select.field,.fsel{width:auto;padding:5px 8px;font-size:13px}
+.spark{display:block;margin-left:auto}
+.spark path{fill:none;stroke:var(--accent);stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.spark path.area{fill:var(--accent-soft);stroke:none}
+@media (max-width:640px){.trow{grid-template-columns:auto minmax(0,1fr)}.trow>.tm{grid-column:2;justify-content:flex-start;text-align:left}.trow .spark{margin-left:0}}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 </style>
 
@@ -433,6 +452,7 @@ select.field{padding:8px 10px;font-size:14px;cursor:pointer}
       <button type="button" data-act="view" data-v="relatorio" aria-pressed="false">Relatório</button>
     </div>
     <div class="savestate" id="savestate" data-s="local"><i></i><span>Carregando…</span></div>
+    <div class="userchip" id="userchip" hidden></div>
   </div>
 </header>
 <main class="wrap" id="main"><div class="loading">Carregando profissionais…</div></main>
@@ -448,6 +468,7 @@ select.field{padding:8px 10px;font-size:14px;cursor:pointer}
   <form class="aiform" id="aiform" autocomplete="off"><textarea class="field" id="aiin" rows="1" placeholder="Pergunte ou descreva a situação…" aria-label="Mensagem para o assistente"></textarea><button type="submit" class="btn" id="aisend">Enviar</button></form>
   <p class="ainote" id="ainote"></p>
 </aside>
+<script src="config.js"></script>
 <script>
 (function(){
 "use strict";
@@ -458,6 +479,7 @@ const STATUS={pendente:"Pendente",andamento:"Em andamento",concluido:"Concluído
 const HUES=["#0071E3","#5E5CE6","#0A8F8F","#C24E00","#AF52DE","#1E7B34"];
 const METHODS=[["fca","FCA"],["pdca","PDCA"],["ish","Ishikawa"],["w5","5W2H"]];
 const LS_KEY="painel5w2h.v1", PREF_KEY="painel5w2h.prefs";
+const CFG=window.PAINEL_CONFIG||{}, SB_ON=!!(CFG.supabaseUrl&&CFG.supabaseAnonKey);
 const BRL=new Intl.NumberFormat("pt-BR",{style:"currency",currency:"BRL"});
 const ICON={
   plus:'<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M8 3v10M3 8h10"/></svg>',
@@ -471,7 +493,8 @@ const ICON={
 };
 
 /* ---------- Estado ---------- */
-const S={profs:[],cfg:defCfg(),view:"painel",tab:"resumo",method:{},mode:"loading",db:null,ro:false,loaded:false,confirmDel:null,focusSel:null,scrollSel:null,pendingRemote:false,guide:true,howOpen:{}};
+const S={profs:[],cfg:defCfg(),view:"painel",tab:"resumo",method:{},mode:"loading",db:null,ro:false,loaded:false,confirmDel:null,focusSel:null,scrollSel:null,pendingRemote:false,guide:true,howOpen:{},
+  sb:null,user:null,perfil:null,perfis:[],hist:[],upd:{},fUser:"",recovery:false,auth:{modo:"entrar",msg:"",erro:false,email:""}};
 function defCfg(){return{titulo:"Programa de Melhoria Contínua",empresa:"",responsavel:"",conclusao:""}}
 try{const pr=JSON.parse(localStorage.getItem(PREF_KEY)||"{}");if(pr.view)S.view=pr.view;if(pr.tab)S.tab=pr.tab;if(pr.method)S.method=pr.method;if(pr.guide===false)S.guide=false;}catch(e){}
 function savePrefs(){try{localStorage.setItem(PREF_KEY,JSON.stringify({view:S.view,tab:S.tab,method:S.method,guide:S.guide}))}catch(e){}}
@@ -491,6 +514,13 @@ function wrap(t,n){const w=String(t||"").split(/\s+/);const out=[];let l="";for(
 function setPath(o,path,v){const k=path.split(".");let c=o;for(let i=0;i<k.length-1;i++){c=c[k[i]]}c[k[k.length-1]]=v}
 function hue(p){return HUES[(p.cor||0)%HUES.length]}
 function cur(){return S.profs.find(p=>p.id===S.tab)}
+const isAdmin=()=>S.mode==="sb"&&!!S.perfil&&S.perfil.papel==="admin";
+const cfgLocked=()=>S.mode==="sb"&&!isAdmin();
+const visProfs=()=>isAdmin()&&S.fUser?S.profs.filter(p=>p.owner===S.fUser):S.profs;
+const exId=id=>S.mode==="sb"&&S.user?id+"-"+S.user.id.slice(0,8):id;
+const hashN=s=>{let h=0;for(const c of String(s))h=(h*31+c.charCodeAt(0))>>>0;return h};
+const fmtDT=s=>{const d=new Date(s);return isNaN(d)?"—":d.toLocaleString("pt-BR",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"})};
+function ownerName(id){const u=S.perfis.find(x=>x.id===id);return u?(u.nome||u.email||"Usuário"):"—"}
 
 function blankPhase(){return{texto:"",status:"pendente"}}
 function blankProf(nome,cargo,setor,ordem){return{nome,cargo,setor,ordem,cor:ordem%HUES.length,problema:"",criadoEm:new Date().toISOString(),
@@ -507,7 +537,7 @@ function norm(id,d){
   p.w5h2=Array.isArray(p.w5h2)?p.w5h2.map(a=>({id:a.id||uid("a"),oque:a.oque||"",porque:a.porque||"",onde:a.onde||"",quando:a.quando||"",quem:a.quem||"",como:a.como||"",quanto:a.quanto==null?"":String(a.quanto),status:STATUS[a.status]?a.status:"pendente"})):[];
   return p;
 }
-function body(p){const b=JSON.parse(JSON.stringify(p));delete b.id;return b}
+function body(p){const b=JSON.parse(JSON.stringify(p));delete b.id;delete b.owner;return b}
 
 /* ---------- Métricas ---------- */
 function metrics(p){
@@ -564,11 +594,23 @@ function recomendacoes(){
 /* ---------- Persistência ---------- */
 const timers={},chains={},dirty=new Set();let cfgTimer=null,cfgDirty=false;
 function setSave(s,txt){const el=$("#savestate");el.dataset.s=s;el.lastElementChild.textContent=txt}
-function savedLabel(){if(S.mode==="local")setSave("local","Salvo neste navegador");else if(S.ro)setSave("local","Somente leitura");else setSave("ok","Salvo")}
+function savedLabel(){if(S.mode==="local")setSave("local","Salvo neste navegador");else if(S.mode==="sb")setSave(S.user?"ok":"local",S.user?"Salvo na nuvem":"Desconectado");else if(S.ro)setSave("local","Somente leitura");else setSave("ok","Salvo")}
 function touch(id){if(S.ro)return;dirty.add(id);setSave("busy","Salvando…");clearTimeout(timers[id]);timers[id]=setTimeout(()=>persist(id),650)}
 function persist(id){
   delete timers[id];
   if(S.mode==="local"){saveLocal();dirty.delete(id);savedLabel();return}
+  if(S.mode==="sb"){
+    const p=S.profs.find(x=>x.id===id);if(!p||!S.sb||!S.user){dirty.delete(id);return}
+    if(!p.owner)p.owner=S.user.id;
+    const row={id,owner:p.owner,dados:body(p),atualizado_em:new Date().toISOString()};
+    const m=metrics(p),h={prof_id:id,owner:p.owner,dia:today(),maturidade:m.prog,acoes:m.acoes,concluidas:m.conc};
+    chains[id]=(chains[id]||Promise.resolve()).then(async()=>{
+      const r=await S.sb.from("profissionais").upsert(row);if(r.error)throw r.error;
+      S.upd[id]=row.atualizado_em;
+      const r2=await S.sb.from("historico").upsert(h,{onConflict:"prof_id,dia"});if(!r2.error)mergeHist(h);
+    }).then(()=>{if(!timers[id])dirty.delete(id);if(!Object.keys(timers).length&&!cfgDirty)savedLabel()}).catch(e=>sbErr(e,id));
+    return;
+  }
   const p=S.profs.find(x=>x.id===id);if(!p||!S.db){dirty.delete(id);return}
   const data=body(p);
   chains[id]=(chains[id]||Promise.resolve()).then(()=>S.db.doc("profissionais/"+id).set(data)).then(()=>{if(!timers[id])dirty.delete(id);if(!Object.keys(timers).length&&!cfgDirty)savedLabel()}).catch(e=>writeErr(e,id));
@@ -579,14 +621,16 @@ function writeErr(e,id){
   else if(e&&e.code==="unavailable"&&id){setTimeout(()=>persist(id),1200+Math.random()*800);return}
   setSave("err","Não salvo");
 }
-function saveCfg(){if(S.ro)return;cfgDirty=true;setSave("busy","Salvando…");clearTimeout(cfgTimer);cfgTimer=setTimeout(()=>{
+function saveCfg(){if(S.ro||cfgLocked())return;cfgDirty=true;setSave("busy","Salvando…");clearTimeout(cfgTimer);cfgTimer=setTimeout(()=>{
   if(S.mode==="local"){saveLocal();cfgDirty=false;savedLabel();return}
+  if(S.mode==="sb"){S.sb.from("config").upsert({id:"geral",dados:Object.assign({},S.cfg)}).then(r=>{if(r.error)throw r.error;cfgDirty=false;savedLabel()}).catch(e=>sbErr(e));return}
   S.db.doc("config/geral").set(Object.assign({},S.cfg)).then(()=>{cfgDirty=false;savedLabel()}).catch(e=>writeErr(e))},700)}
 function saveLocal(){try{localStorage.setItem(LS_KEY,JSON.stringify({profs:S.profs,cfg:S.cfg}))}catch(e){setSave("err","Não salvo")}}
 function loadLocal(){try{const d=JSON.parse(localStorage.getItem(LS_KEY)||"null");if(d){S.profs=(d.profs||[]).map(p=>norm(p.id||uid(),p));S.cfg=Object.assign(defCfg(),d.cfg||{})}}catch(e){}}
 async function removeProf(id){
   S.profs=S.profs.filter(p=>p.id!==id);clearTimeout(timers[id]);delete timers[id];dirty.delete(id);S.tab="resumo";S.confirmDel=null;savePrefs();render();
   if(S.mode==="local"){saveLocal();return}
+  if(S.mode==="sb"){S.hist=S.hist.filter(h=>h.prof_id!==id);const r=await S.sb.from("profissionais").delete().eq("id",id);if(r.error)sbErr(r.error);return}
   try{await S.db.doc("profissionais/"+id).delete()}catch(e){writeErr(e)}
 }
 function sortProfs(){S.profs.sort((a,b)=>a.ordem-b.ordem||String(a.criadoEm).localeCompare(String(b.criadoEm)))}
@@ -616,10 +660,12 @@ function stseg(act,attrs,cur){return`<div class="stseg" role="group" aria-label=
 function render(){
   S.pendingRemote=false;
   document.querySelectorAll('.top [data-act="view"]').forEach(b=>b.setAttribute("aria-pressed",String(b.dataset.v===S.view)));
-  const m=$("#main");
+  const m=$("#main");userChip();
+  if(S.mode==="sb"&&S.loaded&&(!S.user||S.recovery)){m.classList.remove("ro");m.innerHTML=authView();if(typeof drawerSync==="function")drawerSync();return}
   if(!S.loaded){m.innerHTML='<div class="loading">Carregando profissionais…</div>';return}
   m.classList.toggle("ro",S.ro);m.innerHTML=S.view==="relatorio"?reportView():painelView();
   if(S.ro)m.querySelectorAll("input,textarea").forEach(el=>el.readOnly=true);
+  if(cfgLocked())m.querySelectorAll('[data-scope="cfg"]').forEach(el=>el.readOnly=true);
   m.querySelectorAll("textarea.field").forEach(autosize);
   if(S.focusSel){const el=m.querySelector(S.focusSel);S.focusSel=null;S.scrollSel=null;if(el){el.focus({preventScroll:true});if(el.scrollIntoView)el.scrollIntoView({block:"center",behavior:"smooth"})}}
   if(S.scrollSel){const el=m.querySelector(S.scrollSel);S.scrollSel=null;if(el&&el.scrollIntoView)el.scrollIntoView({block:"start",behavior:"smooth"})}
@@ -630,7 +676,7 @@ function autosize(t){if(CSS.supports&&CSS.supports("field-sizing","content"))ret
 function tabsBar(){
   return`<div class="ptabs-wrap"><div class="ptabs" role="tablist" aria-label="Profissionais">
     <button type="button" class="ptab plain" role="tab" data-act="tab" data-id="resumo" aria-selected="${S.tab==="resumo"}">Resumo geral</button>
-    ${S.profs.map(p=>`<button type="button" class="ptab" role="tab" data-act="tab" data-id="${p.id}" aria-selected="${S.tab===p.id}">${av(p)}<span data-tablabel="${p.id}">${esc(firstName(p.nome))}</span></button>`).join("")}
+    ${visProfs().map(p=>`<button type="button" class="ptab" role="tab" data-act="tab" data-id="${p.id}" aria-selected="${S.tab===p.id}">${av(p)}<span data-tablabel="${p.id}">${esc(firstName(p.nome))}</span></button>`).join("")}
     ${S.ro?"":`<button type="button" class="ptab add" data-act="add-prof">+ Profissional</button>`}
   </div></div>`;
 }
@@ -642,7 +688,7 @@ function resumoView(){
   let h=`<div class="hero"><div><div class="eyebrow">${esc(d)}</div><h1>${esc(S.cfg.titulo||"Painel 5W2H")}</h1></div>
     ${S.profs.length?`<div class="row"><button type="button" class="btn ghost" data-act="view" data-v="relatorio">${ICON.eye}Ver relatório</button></div>`:""}</div>`;
   if(!S.profs.length){
-    return h+`<div class="stack"><div class="card empty"><div class="gly">5W2H</div><h2>Comece pelo primeiro profissional</h2>
+    return h+`<div class="stack">${teamCard()}<div class="card empty"><div class="gly">5W2H</div><h2>Comece pelo primeiro profissional</h2>
       <p>Cada profissional ganha uma aba própria com FCA, Ishikawa, 5W2H e PDCA. Um guia indica o próximo passo e leva você direto ao campo a preencher. No final, o painel gera o relatório executivo e a apresentação.</p>
       ${S.ro?"":`<div class="row" style="justify-content:center"><button type="button" class="btn" data-act="add-prof">${ICON.plus}Adicionar profissional</button><button type="button" class="btn ghost" data-act="load-examples">Carregar exemplos</button><button type="button" class="btn quiet" data-act="import-data">Importar dados</button></div>`}
       <p class="small" style="margin-top:18px">${S.mode==="local"?"Neste arquivo, os dados ficam salvos só neste navegador. Use Exportar dados para fazer backup.":"Os exemplos mostram cada método preenchido e podem ser excluídos depois."}</p></div></div>`;
@@ -652,13 +698,14 @@ function resumoView(){
     <div class="kpi"><span class="lbl">Ações 5W2H</span><div class="v">${t.conc}<span class="muted" style="font-size:18px">/${t.acoes}</span></div><div class="s">${t.and} em andamento${t.late?` · <span style="color:var(--bad)">${t.late} em atraso</span>`:""}</div></div>
     <div class="kpi"><span class="lbl">Causas mapeadas</span><div class="v">${t.causas}</div><div class="s">${t.fca} fatos no FCA</div></div>
     <div class="kpi"><span class="lbl">Investimento previsto</span><div class="v" style="font-size:24px">${BRL.format(t.custo)}</div><div class="s">soma do “Quanto custa”</div></div>
-  </div>`+programGuide();
-  h+=`<div class="card"><div class="card-h"><h2>Profissionais</h2><span class="muted small">Toque para abrir a análise</span></div><div class="plist">
-    ${S.profs.map(p=>{const m=metrics(p),ns=nextStep(p);return`<button type="button" class="prow" data-act="tab" data-id="${p.id}" data-m="${ns.m||""}">${av(p,"md")}
+  </div>`+programGuide()+teamCard();
+  const lista=visProfs();
+  h+=`<div class="card" id="lista"><div class="card-h"><h2>${isAdmin()?"Trabalhos":"Profissionais"}</h2>${isAdmin()?`<select class="field fsel" data-fuser aria-label="Filtrar por usuário"><option value="">Todos os usuários</option>${S.perfis.map(u=>`<option value="${u.id}"${S.fUser===u.id?" selected":""}>${esc(u.nome||u.email)}</option>`).join("")}</select>`:`<span class="muted small">Toque para abrir a análise</span>`}</div><div class="plist">
+    ${lista.map(p=>{const m=metrics(p),ns=nextStep(p);return`<button type="button" class="prow" data-act="tab" data-id="${p.id}" data-m="${ns.m||""}">${av(p,"md")}
       <div style="min-width:0"><div class="nm">${esc(p.nome||"Sem nome")}</div><div class="pb">${esc([p.cargo,p.setor].filter(Boolean).join(" · ")||"—")}${p.problema?" — "+esc(p.problema):""}</div>
-      <div class="badges"><span class="badge fca">FCA ${m.fca}</span><span class="badge pdca">PDCA ${m.pdcaDone}/4</span><span class="badge ish">Ishikawa ${m.causas}</span><span class="badge w5">5W2H ${m.conc}/${m.acoes}</span>${m.late?`<span class="badge" style="color:var(--bad)">${m.late} em atraso</span>`:""}</div>
+      <div class="badges">${isAdmin()?`<span class="badge">${esc(ownerName(p.owner))}</span>`:""}<span class="badge fca">FCA ${m.fca}</span><span class="badge pdca">PDCA ${m.pdcaDone}/4</span><span class="badge ish">Ishikawa ${m.causas}</span><span class="badge w5">5W2H ${m.conc}/${m.acoes}</span>${m.late?`<span class="badge" style="color:var(--bad)">${m.late} em atraso</span>`:""}</div>
       <div class="nexthint${ns.done?" ok":ns.tone==="bad"?" bad":""}">${ns.done?"Ciclo completo":(ns.n<5?"Próximo passo: ":"Acompanhar: ")+esc(ns.title)}</div></div>
-      ${ring(m.prog,52)}</button>`}).join("")}
+      ${ring(m.prog,52)}</button>`}).join("")||`<p class="tip">Nenhum trabalho deste usuário.</p>`}
   </div></div>`;
   const acts=allActions().filter(x=>x.a.status!=="concluido").sort((x,y)=>(x.a.quando||"9999").localeCompare(y.a.quando||"9999")).slice(0,6);
   const maxc=Math.max(1,...CATS.map(([k])=>t.cat[k]));
@@ -684,14 +731,16 @@ function programGuide(){
     [!!S.cfg.conclusao.trim(),"Escreva o parecer executivo","A conclusão da liderança entra no relatório e na apresentação.",`<button type="button" class="btn quiet sm" data-act="guide-cfg" data-f="#c-conclusao">Escrever</button>`],
     [false,"Gere os entregáveis","Relatório em PDF ou HTML e apresentação em PowerPoint.",`<button type="button" class="btn quiet sm" data-act="guide-export">Ver opções</button>`]
   ];
-  if(items.slice(0,4).every(x=>x[0]))return"";
-  const cur0=items.findIndex(x=>!x[0]);
+  // Na nuvem, título e parecer são do administrador: o usuário comum não vê esses passos.
+  const list=cfgLocked()?items.filter((x,i)=>i!==0&&i!==3):items;
+  if(list.slice(0,-1).every(x=>x[0]))return"";
+  const cur0=list.findIndex(x=>!x[0]);
   return`<div class="card"><div class="card-h"><div><div class="eyebrow">Primeiros passos</div><h2 style="margin-top:4px">Como montar o programa</h2></div><button type="button" class="btn quiet sm" data-act="guide-toggle">Ocultar guia</button></div>
-  <ol class="plan">${items.map(([ok,t,d,btn],i)=>`<li class="${ok?"ok":i===cur0?"cur":""}"><span class="dot">${ok?ICON.check:i+1}</span><div style="min-width:0"><b>${t}</b><p>${d}</p></div>${ok?"":btn}</li>`).join("")}</ol></div>`;
+  <ol class="plan">${list.map(([ok,t,d,btn],i)=>`<li class="${ok?"ok":i===cur0?"cur":""}"><span class="dot">${ok?ICON.check:i+1}</span><div style="min-width:0"><b>${t}</b><p>${d}</p></div>${ok?"":btn}</li>`).join("")}</ol></div>`;
 }
 function dataCard(){
-  const hasEx=EXAMPLES.every(e=>S.profs.some(p=>p.id===e.id));
-  return`<div class="card"><div class="card-h"><div><h2>Dados do painel</h2><p class="muted small" style="margin:4px 0 0">${S.mode==="local"?"Neste arquivo, os dados ficam salvos só neste navegador. Exporte com frequência para não perder o que foi preenchido.":"Exporte para guardar um backup ou levar os dados para o arquivo HTML. Importe para trazer dados preenchidos no arquivo HTML."}</p></div></div>
+  const hasEx=EXAMPLES.every(e=>S.profs.some(p=>p.id===exId(e.id)));
+  return`<div class="card"><div class="card-h"><div><h2>Dados do painel</h2><p class="muted small" style="margin:4px 0 0">${S.mode==="sb"?"Os dados ficam salvos na nuvem, na sua conta. Exporte para guardar um backup ou levar para outro lugar.":S.mode==="local"?"Neste arquivo, os dados ficam salvos só neste navegador. Exporte com frequência para não perder o que foi preenchido.":"Exporte para guardar um backup ou levar os dados para o arquivo HTML. Importe para trazer dados preenchidos no arquivo HTML."}</p></div></div>
   <div class="row"><button type="button" class="btn ghost" data-act="export-data">Exportar dados (.json)</button>${S.ro?"":`<button type="button" class="btn quiet" data-act="import-data">Importar dados</button>${hasEx?"":`<button type="button" class="btn quiet" data-act="load-examples">Carregar exemplos</button>`}`}</div>
   <p class="small muted" style="margin:12px 0 0">A importação adiciona os profissionais do arquivo e atualiza os que já existem com o mesmo registro. Nada é apagado.</p></div>`;
 }
@@ -991,7 +1040,7 @@ $("#sheet").addEventListener("click",e=>{if(e.target.id==="sheet"||e.target.clos
 $("#sheet").addEventListener("submit",e=>{e.preventDefault();const nome=$("#np-nome").value.trim();if(!nome){$("#np-nome").focus();return}
   const ordem=S.profs.reduce((a,p)=>Math.max(a,p.ordem),-1)+1;const id=uid();
   const p=norm(id,blankProf(nome,$("#np-cargo").value.trim(),$("#np-setor").value.trim(),ordem));
-  p.problema=$("#np-prob").value.trim();
+  p.problema=$("#np-prob").value.trim();if(S.mode==="sb"&&S.user)p.owner=S.user.id;
   S.profs.push(p);S.tab=id;S.method[id]="fca";S.view="painel";S.guide=true;savePrefs();closeSheet();
   S.focusSel=p.problema?null:"#"+CSS.escape(fid("problema",id));render();if(p.problema)window.scrollTo({top:0});touch(id);toast(firstName(nome)+" adicionado. Siga o guia.");
 });
@@ -1043,7 +1092,14 @@ function act(a,b){
     case"export-html":exportHTML();break;
     case"export-data":exportData();break;
     case"import-data":if(!S.ro)$("#importfile").click();break;
-    case"load-examples":if(!S.ro){putProfs(EXAMPLES.map(e=>norm(e.id,e)),null);S.tab="resumo";toast("Exemplos carregados")}break;
+    case"logout":if(S.sb)S.sb.auth.signOut();break;
+    case"auth-modo":S.auth={modo:S.auth.modo==="cadastrar"?"entrar":"cadastrar",msg:"",erro:false,email:(($("#au-email")||{}).value||"").trim()};render();break;
+    case"auth-reset":{const em=(($("#au-email")||{}).value||"").trim();
+      if(!em){S.auth={modo:"entrar",msg:"Digite o seu e-mail acima e toque de novo em Esqueci a senha.",erro:true,email:""};render();break}
+      S.sb.auth.resetPasswordForEmail(em,{redirectTo:location.origin+location.pathname}).then(r=>{S.auth={modo:"entrar",msg:r.error?authMsg(r.error):"Enviamos um link para redefinir a senha. Confira o seu e-mail.",erro:!!r.error,email:em};render()});break}
+    case"sb-refresh":setSave("busy","Atualizando…");sbLoad().then(()=>{savedLabel();render()}).catch(e=>sbErr(e));break;
+    case"f-user":S.fUser=b.dataset.u;S.scrollSel="#lista";render();break;
+    case"load-examples":if(!S.ro){putProfs(EXAMPLES.map(e=>norm(exId(e.id),e)),null);S.tab="resumo";toast("Exemplos carregados")}break;
   }
 }
 function addCause(k){const inpEl=main.querySelector(`[data-cause-input="${k}"]`);if(!inpEl)return;const v=inpEl.value.trim();if(!v){inpEl.focus();return}
@@ -1059,6 +1115,8 @@ main.addEventListener("input",e=>{
   if(/^w5h2\.\d+\.quanto$/.test(b)){const s=main.querySelector('[data-d="w5sum"]');if(s)s.innerHTML=w5sum(metrics(p))}
 });
 main.addEventListener("change",e=>{const t=e.target;if(!t.dataset)return;
+  if(t.dataset.fuser!=null){S.fUser=t.value;render();return}
+  if(t.dataset.papel){setPapel(t.dataset.papel,t.value);return}
   if(t.dataset.rerender==="all"){S.focusSel=null;render();return}
   if(t.dataset.classify!=null&&t.value){const i=+t.dataset.classify,k=t.value,lab=CATS.find(c=>c[0]===k)[1];mutate(p=>{const c=p.fca[i]&&p.fca[i].causa.trim();if(c)p.ishikawa.causas[k].push(c)});toast("Causa adicionada em "+lab)}
 });
@@ -1111,6 +1169,7 @@ async function putProfs(list,cfg){
   if(cfg)S.cfg=Object.assign(defCfg(),cfg);
   sortProfs();render();
   if(S.mode==="local"){saveLocal();savedLabel();return}
+  if(S.mode==="sb"){list.forEach(p=>{if(!p.owner)p.owner=S.user.id;touch(p.id)});if(cfg)saveCfg();return}
   setSave("busy","Salvando…");
   try{for(const p of list){dirty.add(p.id);await S.db.doc("profissionais/"+p.id).set(body(p));dirty.delete(p.id)}
     if(cfg)await S.db.doc("config/geral").set(Object.assign({},S.cfg));savedLabel()}
@@ -1123,9 +1182,12 @@ function exportData(){
 async function importData(file){
   let d;try{d=JSON.parse(await file.text())}catch(e){d=null}
   if(!d||!Array.isArray(d.profs)){toast("Arquivo inválido. Use um .json exportado pelo Painel 5W2H.");return}
-  const list=d.profs.filter(p=>p&&typeof p==="object").map(p=>norm((String(p.id||"").replace(/[^A-Za-z0-9_\-.~:@+]/g,"").slice(0,80))||uid(),p));
+  const cleanId=p=>String(p.id||"").replace(/[^A-Za-z0-9_\-.~:@+]/g,"").slice(0,80);
+  // Na nuvem, um id que não está visível pode pertencer a outro usuário: o registro entra com id novo.
+  const list=d.profs.filter(p=>p&&typeof p==="object").map(p=>{const c=cleanId(p);return norm(c&&(S.mode!=="sb"||S.profs.some(x=>x.id===c))?c:uid(),p)});
+  if(S.mode==="sb")list.forEach(p=>{const ex=S.profs.find(x=>x.id===p.id);p.owner=ex?ex.owner:S.user.id});
   const cfgVazio=!S.cfg.empresa&&!S.cfg.responsavel&&!S.cfg.conclusao;
-  await putProfs(list,d.cfg&&cfgVazio?d.cfg:null);
+  await putProfs(list,d.cfg&&cfgVazio&&!cfgLocked()?d.cfg:null);
   S.tab="resumo";savePrefs();render();
   toast(plural(list.length,"profissional importado","profissionais importados"));
 }
@@ -1518,10 +1580,142 @@ $("#aidrawer").addEventListener("click",e=>{
 });
 document.addEventListener("keydown",e=>{if(e.key==="Escape"&&!$("#aidrawer").hidden&&$("#sheet").hidden)aiClose()});
 
+/* ---------- Perfis e acesso (Supabase) ---------- */
+function userChip(){
+  const el=$("#userchip");if(!el)return;
+  if(S.mode!=="sb"||!S.user){el.hidden=true;el.innerHTML="";return}
+  el.hidden=false;
+  el.innerHTML=`<span class="rl">${isAdmin()?"Admin":"Usuário"}</span><span class="un">${esc((S.perfil&&S.perfil.nome)||S.user.email)}</span><button type="button" class="btn quiet sm" data-act="logout">Sair</button>`;
+}
+function authView(){
+  const a=S.auth,md=S.recovery?"senha":a.modo,cad=md==="cadastrar";
+  const title={entrar:"Entrar",cadastrar:"Criar conta",senha:"Nova senha"}[md];
+  const sub={entrar:"Use o e-mail e a senha cadastrados.",cadastrar:"Cada usuário vê e edita só os próprios trabalhos. O administrador acompanha a evolução de todos.",senha:"Defina a nova senha da sua conta."}[md];
+  return`<div class="auth"><div class="card"><div class="eyebrow">Painel 5W2H</div><h2 style="margin:4px 0 6px">${title}</h2><p class="muted small" style="margin:0 0 18px">${sub}</p>
+  <form id="authform" data-modo="${md}">
+    ${cad?`<div>${lab("Nome","au-nome")}<input class="field" id="au-nome" autocomplete="name" required></div>`:""}
+    ${md==="senha"?"":`<div>${lab("E-mail","au-email")}<input class="field" id="au-email" type="email" autocomplete="email" value="${esc(a.email||"")}" required></div>`}
+    <div>${lab(md==="senha"?"Nova senha":"Senha","au-senha")}<input class="field" id="au-senha" type="password" autocomplete="${md==="entrar"?"current-password":"new-password"}" minlength="6" required>${md==="entrar"?"":`<p class="hint">Mínimo de 6 caracteres.</p>`}</div>
+    ${a.msg?`<p class="${a.erro?"msg-err":"msg-ok"}" role="status">${esc(a.msg)}</p>`:""}
+    <button type="submit" class="btn">${title}</button></form>
+  ${md==="senha"?"":`<div class="row" style="justify-content:space-between;margin-top:14px"><button type="button" class="linkbtn" data-act="auth-modo">${cad?"Já tenho conta":"Criar uma conta"}</button>${cad?"":`<button type="button" class="linkbtn" data-act="auth-reset">Esqueci a senha</button>`}</div>`}</div></div>`;
+}
+function authMsg(e){
+  const m=String(e&&e.message||"");
+  if(/Invalid login credentials/i.test(m))return"E-mail ou senha incorretos.";
+  if(/Email not confirmed/i.test(m))return"Confirme o seu e-mail pelo link enviado antes de entrar.";
+  if(/already registered|already been registered/i.test(m))return"Este e-mail já tem conta. Use Entrar.";
+  if(/Password should be/i.test(m))return"A senha precisa ter pelo menos 6 caracteres.";
+  if(/rate limit|security purposes/i.test(m))return"Muitas tentativas seguidas. Aguarde um minuto e tente de novo.";
+  if(/fetch|network/i.test(m))return"Sem conexão com o servidor. Verifique a internet.";
+  return m||"Não foi possível concluir. Tente de novo.";
+}
+main.addEventListener("submit",async e=>{
+  const f=e.target;if(f.id!=="authform")return;e.preventDefault();
+  const md=f.dataset.modo,btn=f.querySelector('[type="submit"]'),senha=$("#au-senha").value,email=md==="senha"?"":$("#au-email").value.trim();
+  btn.disabled=true;
+  try{
+    if(md==="senha"){const r=await S.sb.auth.updateUser({password:senha});if(r.error)throw r.error;S.recovery=false;S.auth={modo:"entrar",msg:"",erro:false,email:""};render();toast("Senha atualizada");return}
+    if(md==="cadastrar"){
+      const r=await S.sb.auth.signUp({email,password:senha,options:{data:{nome:$("#au-nome").value.trim()},emailRedirectTo:location.origin+location.pathname}});if(r.error)throw r.error;
+      if(!r.data.session){S.auth={modo:"entrar",msg:"Conta criada. Abra o link enviado ao seu e-mail para confirmar e depois entre.",erro:false,email};render()}
+      return;
+    }
+    const r=await S.sb.auth.signInWithPassword({email,password:senha});if(r.error)throw r.error;
+  }catch(err){S.auth=Object.assign({},S.auth,{msg:authMsg(err),erro:true,email});render()}
+  finally{if(btn.isConnected)btn.disabled=false}
+});
+function sbErr(e,id){
+  console.error(e);const m=String(e&&e.message||"");
+  if(/JWT|token|session/i.test(m))toast("A sua sessão expirou. Entre novamente.");
+  else if(/row-level security|permission|violates/i.test(m))toast("Você não tem permissão para alterar este registro.");
+  else if(id&&/fetch|network|Failed/i.test(m)){setSave("err","Sem conexão. Tentando…");setTimeout(()=>persist(id),2500);return}
+  else toast("Não foi possível salvar: "+trunc(m||"erro desconhecido",80));
+  setSave("err","Não salvo");
+}
+function mergeHist(h){const i=S.hist.findIndex(x=>x.prof_id===h.prof_id&&x.dia===h.dia);if(i>=0)S.hist[i]=h;else S.hist.push(h)}
+function rowProf(r){const p=norm(r.id,r.dados);p.owner=r.owner;S.upd[r.id]=r.atualizado_em;return p}
+async function sbLoad(){
+  const[pf,pr,cf]=await Promise.all([
+    S.sb.from("perfis").select("id,nome,email,papel,criado_em"),
+    S.sb.from("profissionais").select("id,owner,dados,atualizado_em"),
+    S.sb.from("config").select("dados").eq("id","geral").maybeSingle()]);
+  if(pf.error)throw pf.error;if(pr.error)throw pr.error;
+  S.perfis=pf.data||[];
+  S.perfil=S.perfis.find(x=>x.id===S.user.id)||{id:S.user.id,nome:"",email:S.user.email||"",papel:"usuario"};
+  S.profs=(pr.data||[]).filter(r=>!dirty.has(r.id)).map(rowProf).concat(S.profs.filter(p=>dirty.has(p.id)));sortProfs();
+  if(!cfgDirty)S.cfg=Object.assign(defCfg(),cf.data&&cf.data.dados||{});
+  if(isAdmin()){const d=new Date();d.setDate(d.getDate()-90);
+    const h=await S.sb.from("historico").select("prof_id,owner,dia,maturidade,acoes,concluidas").gte("dia",d.toISOString().slice(0,10)).order("dia");
+    if(!h.error)S.hist=h.data||[];}
+}
+function onSbChange(pl){
+  if(pl.eventType==="DELETE"){const id=pl.old&&pl.old.id;if(id&&!dirty.has(id)&&S.profs.some(p=>p.id===id)){S.profs=S.profs.filter(p=>p.id!==id);if(S.tab===id)S.tab="resumo";remoteRender()}return}
+  const r=pl.new;if(!r||!r.id||dirty.has(r.id))return;
+  const p=rowProf(r),i=S.profs.findIndex(x=>x.id===r.id);
+  if(i>=0&&JSON.stringify(S.profs[i])===JSON.stringify(p))return;
+  if(i>=0)S.profs[i]=p;else S.profs.push(p);sortProfs();
+  if(isAdmin()){const m=metrics(p);mergeHist({prof_id:p.id,owner:p.owner,dia:today(),maturidade:m.prog,acoes:m.acoes,concluidas:m.conc});
+    if(!S.perfis.some(u=>u.id===p.owner))sbLoad().then(remoteRender).catch(()=>{});}
+  remoteRender();
+}
+let sbChan=null;
+async function onSession(session){
+  const u=session&&session.user||null;
+  if((u&&u.id)===(S.user&&S.user.id)&&S.loaded){if(S.recovery)render();return}
+  if(sbChan){S.sb.removeChannel(sbChan);sbChan=null}
+  S.user=u;S.profs=[];S.perfil=null;S.perfis=[];S.hist=[];S.upd={};S.fUser="";dirty.clear();S.cfg=defCfg();
+  if(!u){S.loaded=true;S.recovery=false;savedLabel();render();return}
+  S.loaded=false;setSave("busy","Carregando…");render();
+  try{await sbLoad();savedLabel()}catch(e){console.error(e);setSave("err","Sem conexão");toast("Não foi possível carregar os dados: "+trunc(String(e&&e.message||""),80))}
+  S.loaded=true;if(S.tab!=="resumo"&&!cur())S.tab="resumo";render();
+  sbChan=S.sb.channel("profissionais-"+u.id).on("postgres_changes",{event:"*",schema:"public",table:"profissionais"},onSbChange).subscribe();
+}
+async function bootSb(){
+  S.mode="sb";setSave("busy","Conectando…");
+  try{await loadLib("supabase",["https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"],()=>window.supabase&&window.supabase.createClient)}
+  catch(e){S.mode="local";loadLocal();sortProfs();S.loaded=true;if(S.tab!=="resumo"&&!cur())S.tab="resumo";savedLabel();render();toast("Sem conexão com o servidor. Os dados ficam só neste navegador por enquanto.");return}
+  S.sb=window.supabase.createClient(CFG.supabaseUrl,CFG.supabaseAnonKey);
+  // O callback do Supabase não pode aguardar outras chamadas dele: o trabalho segue fora dele.
+  S.sb.auth.onAuthStateChange((ev,session)=>{if(ev==="PASSWORD_RECOVERY")S.recovery=true;setTimeout(()=>onSession(session),0)});
+  const{data}=await S.sb.auth.getSession();await onSession(data.session);
+}
+async function setPapel(id,papel){
+  const r=await S.sb.from("perfis").update({papel}).eq("id",id).select("id");
+  if(r.error||!r.data||!r.data.length){toast(r.error?authMsg(r.error):"Não foi possível alterar o papel.");render();return}
+  const u=S.perfis.find(x=>x.id===id);if(u)u.papel=papel;
+  toast(papel==="admin"?"Usuário promovido a administrador":"Acesso de administrador removido");render();
+}
+function userSeries(uid){
+  const H=S.hist.filter(h=>h.owner===uid&&S.profs.some(p=>p.id===h.prof_id));if(!H.length)return[];
+  const days=[...new Set(H.map(h=>h.dia))].sort(),last={};
+  return days.map(d=>{H.filter(h=>h.dia===d).forEach(h=>last[h.prof_id]=h.maturidade);const v=Object.values(last);return v.reduce((a,b)=>a+b,0)/v.length});
+}
+function spark(v){
+  const w=120,h=34;if(!v.length)return`<span class="muted small">sem histórico</span>`;if(v.length===1)v=[v[0],v[0]];
+  const pts=v.map((y,i)=>[2+i/(v.length-1)*(w-4),h-2-y/100*(h-4)]),d="M"+pts.map(p=>p[0].toFixed(1)+" "+p[1].toFixed(1)).join("L");
+  return`<svg class="spark" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" role="img" aria-label="Maturidade de ${Math.round(v[0])}% para ${Math.round(v[v.length-1])}%"><path class="area" d="${d}L${pts[pts.length-1][0].toFixed(1)} ${h}L${pts[0][0].toFixed(1)} ${h}Z"/><path d="${d}"/></svg>`;
+}
+function teamCard(){
+  if(!isAdmin())return"";
+  const users=S.perfis.slice().sort((a,b)=>String(a.nome||a.email).localeCompare(String(b.nome||b.email)));
+  return`<div class="card" id="equipe"><div class="card-h"><div><div class="eyebrow">Administrador</div><h2 style="margin-top:4px">Evolução da equipe</h2></div><button type="button" class="btn quiet sm" data-act="sb-refresh">Atualizar</button></div>
+  <div class="team">${users.map(u=>{
+    const ps=S.profs.filter(p=>p.owner===u.id),ms=ps.map(metrics),sum=k=>ms.reduce((a,m)=>a+m[k],0);
+    const prog=ms.length?Math.round(sum("prog")/ms.length):0,last=ps.map(p=>S.upd[p.id]||"").sort().pop(),nm=u.nome||u.email||"Usuário";
+    return`<div class="trow"><span class="av md" style="background:${HUES[hashN(u.id)%HUES.length]}" aria-hidden="true">${esc(initials(nm))}</span>
+    <div style="min-width:0"><div class="nm">${esc(u.nome||"Sem nome")}${u.id===S.user.id?' <span class="muted small">(você)</span>':""}${u.papel==="admin"?' <span class="badge">Admin</span>':""}</div><div class="em">${esc(u.email)}</div>
+      <div class="badges"><span class="badge">${plural(ps.length,"trabalho","trabalhos")}</span><span class="badge w5">Ações ${sum("conc")}/${sum("acoes")}</span>${sum("late")?`<span class="badge" style="color:var(--bad)">${sum("late")} em atraso</span>`:""}<span class="badge">${last?"Atualizado "+fmtDT(last):"Sem atividade"}</span></div></div>
+    <div class="tm" style="text-align:right">${spark(userSeries(u.id))}<div class="small" style="margin-top:2px"><b>${prog}%</b> <span class="muted">maturidade</span></div></div>
+    <div class="tm row" style="gap:6px;justify-content:flex-end">${ps.length?`<button type="button" class="btn ghost sm" data-act="f-user" data-u="${u.id}">Ver trabalhos</button>`:""}${u.id===S.user.id?"":`<select class="field" data-papel="${u.id}" aria-label="Papel de ${esc(nm)}"><option value="usuario"${u.papel!=="admin"?" selected":""}>Usuário</option><option value="admin"${u.papel==="admin"?" selected":""}>Admin</option></select>`}</div></div>`}).join("")||`<p class="tip">Nenhum usuário cadastrado ainda.</p>`}</div>
+  <p class="small muted" style="margin:12px 0 0">A curva mostra a maturidade média dos trabalhos de cada usuário nos últimos 90 dias. Novos usuários aparecem aqui depois de criarem a conta.</p></div>`;
+}
+
 /* ---------- Início ---------- */
 async function boot(){
   render();
   if(window.claude&&window.claude.use){window.claude.use("sample").then(f=>{AI.fn=f;AI.state=f?"on":"off";drawerRender()}).catch(()=>{AI.state="off";drawerRender()})}else{AI.state="off"}
+  if(SB_ON){bootSb();return}
   let db=null,user=null;
   if(window.claude&&window.claude.use){try{[db,user]=await Promise.all([window.claude.use("db"),window.claude.use("user")])}catch(e){}}
   if(db){
