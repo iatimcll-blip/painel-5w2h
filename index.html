@@ -2324,7 +2324,7 @@ async function iaModel(){
   const[appM,aiM]=await Promise.all([import(base+"firebase-app.js"),import(base+"firebase-ai.js")]);
   const app=appM.getApps().find(a=>a.name==="ia")||appM.initializeApp(CFG.firebase,"ia");
   const ai=aiM.getAI(app,{backend:new aiM.GoogleAIBackend()});
-  IA.model=aiM.getGenerativeModel(ai,{model:"gemini-2.5-flash",systemInstruction:AGENT_RULES,tools:[{functionDeclarations:agentTools()}]});
+  IA.model=aiM.getGenerativeModel(ai,{model:"gemini-3.8-flash",systemInstruction:AGENT_RULES,tools:[{functionDeclarations:agentTools()}]});
   return IA.model;
 }
 function acharProf(nome){
